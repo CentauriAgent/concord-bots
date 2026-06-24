@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 
+mod auth;
 mod bot;
 mod config;
 mod handlers;

@@ -14,6 +14,8 @@ use std::path::PathBuf;
 pub struct BotConfig {
     pub bot: BotSection,
     #[serde(default)]
+    pub auth: AuthSection,
+    #[serde(default)]
     pub communities: CommunitiesSection,
     #[serde(default)]
     pub scheduling: SchedulingSection,
@@ -45,6 +47,55 @@ pub struct BotSection {
     /// About text for bot profile (optional).
     pub about: Option<String>,
 }
+
+// -----------------------------------------------------------------------------
+// Auth section
+// -----------------------------------------------------------------------------
+
+/// Authorization configuration.
+///
+/// Set `owner` to enable the built-in auth system. When not configured,
+/// all commands are public (backward-compatible with pre-auth bots).
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthSection {
+    /// Bot owner's npub. When set, the auth system is enabled.
+    pub owner: Option<String>,
+
+    /// Initial authorized npubs (seed list from config).
+    #[serde(default)]
+    pub authorized: Vec<String>,
+
+    /// Save the authorized list to a state file across restarts.
+    #[serde(default = "default_persist_true")]
+    pub persist: bool,
+
+    /// Where to persist authorized users (relative to cwd or absolute).
+    #[serde(default = "default_state_file")]
+    pub state_file: String,
+}
+
+impl Default for AuthSection {
+    fn default() -> Self {
+        Self {
+            owner: None,
+            authorized: Vec::new(),
+            persist: true,
+            state_file: default_state_file(),
+        }
+    }
+}
+
+fn default_persist_true() -> bool {
+    true
+}
+
+fn default_state_file() -> String {
+    "auth_state.json".to_string()
+}
+
+// -----------------------------------------------------------------------------
+// Communities section
+// -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct CommunitiesSection {
@@ -126,6 +177,12 @@ impl BotConfig {
         tracing::info!("Config summary:");
         tracing::info!("  nsec: {}", if self.bot_nsec().is_some() { "provided" } else { "auto-generate" });
         tracing::info!("  invite_policy: {}", self.bot.invite_policy);
+        if let Some(ref owner) = self.auth.owner {
+            tracing::info!("  auth owner: {}", owner);
+            tracing::info!("  auth authorized (seed): {}", self.auth.authorized.len());
+        } else {
+            tracing::info!("  auth: disabled (no owner configured)");
+        }
         tracing::info!("  communities to join: {}", self.communities.join.len());
         if let Some(ref name) = self.bot.display_name {
             tracing::info!("  display_name: {}", name);
@@ -167,6 +224,10 @@ nsec = "nsec1test..."
 invite_policy = "public"
 display_name = "Test Bot"
 
+[auth]
+owner = "npub1owner..."
+authorized = ["npub1friend..."]
+
 [communities]
 join = ["abc123"]
 "#;
@@ -174,6 +235,17 @@ join = ["abc123"]
         assert_eq!(config.bot.nsec.as_deref(), Some("nsec1test..."));
         assert_eq!(config.bot.invite_policy, "public");
         assert_eq!(config.bot.display_name.as_deref(), Some("Test Bot"));
+        assert_eq!(config.auth.owner.as_deref(), Some("npub1owner..."));
+        assert_eq!(config.auth.authorized, vec!["npub1friend..."]);
         assert_eq!(config.communities.join, vec!["abc123"]);
+    }
+
+    #[test]
+    fn test_auth_defaults() {
+        let config = BotConfig::default();
+        assert!(config.auth.owner.is_none());
+        assert!(config.auth.authorized.is_empty());
+        assert!(config.auth.persist); // defaults to true
+        assert_eq!(config.auth.state_file, "auth_state.json");
     }
 }

@@ -34,6 +34,32 @@ invite_policy = "manual"
 # about = "A helpful Vector bot built with concord-bots"
 
 # =============================================================================
+# Authorization — owner and permission system
+# =============================================================================
+#
+# When configured, enables built-in auth commands (!add, !remove, !list, !auth)
+# and lets you gate custom commands by permission level.
+# When not configured, all commands are public (backward-compatible).
+
+[auth]
+# Bot owner's npub (required to enable auth system).
+# The owner has full control: can !add/!remove users, run Owner-only commands.
+# owner = "npub1yournpub..."
+
+# Initial authorized npubs (seed list).
+# Additional users can be added at runtime via !add.
+# authorized = [
+#   "npub1friend1...",
+#   "npub1friend2...",
+# ]
+
+# Persist the authorized list across restarts (default: true).
+# persist = true
+
+# State file for the authorized list (default: "auth_state.json").
+# state_file = "auth_state.json"
+
+# =============================================================================
 # Communities — channels to join on startup
 # =============================================================================
 

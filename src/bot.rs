@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use vector_sdk::VectorBot;
 
+use crate::auth::AuthManager;
 use crate::config::BotConfig;
 use crate::handlers;
 
@@ -27,6 +28,9 @@ pub struct BotContext {
     pub bot: VectorBot,
     /// The parsed bot.toml configuration.
     pub config: Arc<BotConfig>,
+    /// Authorization manager (None if auth is not configured).
+    /// Use this in command handlers to check permissions.
+    pub auth: Option<AuthManager>,
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -74,20 +78,59 @@ pub async fn run(config: BotConfig) -> Result<()> {
     tracing::info!("Bot online as {}", bot.npub());
 
     // -------------------------------------------------------------------------
-    // Step 2: Create shared context and register handlers
+    // Step 2: Initialize auth system (if configured)
+    // -------------------------------------------------------------------------
+
+    let auth = if let Some(ref owner) = config.auth.owner {
+        if !owner.is_empty() {
+            let state_file = std::path::PathBuf::from(&config.auth.state_file);
+            match AuthManager::new(
+                owner,
+                &config.auth.authorized,
+                config.auth.persist,
+                state_file,
+            ) {
+                Ok(m) => {
+                    tracing::info!(
+                        "Auth system enabled — owner: {}, authorized users: {}",
+                        owner,
+                        m.authorized_count()
+                    );
+                    Some(m)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initialize auth system: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        tracing::info!("Auth system disabled (no owner npub configured — all commands are public)");
+        None
+    };
+
+    // -------------------------------------------------------------------------
+    // Step 3: Create shared context and register handlers
     // -------------------------------------------------------------------------
 
     let ctx = BotContext {
         bot: bot.clone(),
         config: Arc::new(config),
+        auth,
     };
+
+    // -------------------------------------------------------------------------
+    // Step 4: Register all handlers (commands, scheduled tasks, AI bridge)
+    // -------------------------------------------------------------------------
 
     // Register all handlers (commands, scheduled tasks, AI bridge).
     // This is where your custom code gets wired in.
     handlers::register(&bot, ctx.clone()).await?;
 
     // -------------------------------------------------------------------------
-    // Step 3: Message loop — run until interrupted
+    // Step 5: Message loop — run until interrupted
     // -------------------------------------------------------------------------
 
     // The on_message handler is the main entry point for incoming messages.

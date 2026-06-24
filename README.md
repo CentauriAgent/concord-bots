@@ -43,6 +43,7 @@ concord-bots/
 │   ├── main.rs            ← Entry point (stable — don't edit)
 │   ├── bot.rs             ← Vector connection (stable — don't edit)
 │   ├── config.rs          ← TOML config loader (stable — don't edit)
+│   ├── auth.rs            ← Auth manager (stable — don't edit)
 │   ├── handlers/          ← 🔧 YOUR CODE GOES HERE
 │   │   ├── mod.rs         ← Handler dispatch
 │   │   ├── commands.rs    ← !command handlers
@@ -67,24 +68,54 @@ concord-bots/
 
 | File | Edit? | What it does |
 |------|-------|-------------|
-| `src/handlers/commands.rs` | ✅ **Yes** | Add `!command` handlers |
+| `src/handlers/commands.rs` | ✅ **Yes** | Add `!command` handlers + auth checks |
 | `src/handlers/scheduled.rs` | ✅ **Yes** | Add scheduled/interval tasks |
 | `src/handlers/ai_bridge.rs` | ✅ **Yes** | Configure AI integration |
 | `src/handlers/mod.rs` | ✅ **Yes** | Change dispatch logic |
-| `config/bot.toml` | ✅ **Yes** | Bot configuration |
+| `config/bot.toml` | ✅ **Yes** | Bot + auth configuration |
 | `src/main.rs` | ❌ No | Entry point (stable) |
 | `src/bot.rs` | ❌ No | Connection logic (stable) |
+| `src/auth.rs` | ❌ No | Auth manager (stable core) |
 | `src/config.rs` | ❌ No | Config loader (stable) |
 | `src/lib/` | ❌ No | Utilities (stable) |
 
 ## Built-in commands
 
-| Command | Description |
-|---------|-------------|
-| `!ping` | Health check — replies with `pong 🏓` |
-| `!help` | Lists all available commands |
-| `!echo <text>` | Echoes back the text |
-| `!whoami` | Shows the bot's npub and version |
+| Command | Auth Level | Description |
+|---------|------------|-------------|
+| `!ping` | Public | Health check — replies with `pong 🏓` |
+| `!help` | Public | Lists all available commands |
+| `!echo <text>` | Public | Echoes back the text |
+| `!whoami` | Public | Shows the bot's npub and version |
+| `!auth` | Public | Shows your authorization status |
+| `!add <npub>` | Owner | Adds a user to the authorized list |
+| `!remove <npub>` | Owner | Removes a user from the authorized list |
+| `!list` | Owner | Lists all authorized users |
+
+## Authorization System
+
+The framework includes a built-in permission system with three levels:
+
+| Level | Who | Example Commands |
+|-------|-----|------------------|
+| **Public** | Anyone | `!ping`, `!price`, `!help` |
+| **Authorized** | Owner + users added via `!add` | `!status`, `!weather` |
+| **Owner** | Only the configured owner | `!add`, `!remove`, `!shutdown` |
+
+### Setup
+
+Set the owner npub in `config/bot.toml`:
+
+```toml
+[auth]
+owner = "npub1yournpub..."
+authorized = ["npub1friend1..."]  # optional seed list
+persist = true                      # save across restarts (default)
+```
+
+When not configured, all commands are public (backward-compatible).
+
+See [`AGENTS.md`](AGENTS.md) for details on adding auth checks to custom commands.
 
 ## Deployment
 

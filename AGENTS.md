@@ -5,7 +5,7 @@
 ## TL;DR
 
 1. Edit files in `src/handlers/` — that's where ALL custom code goes
-2. Don't touch `src/main.rs`, `src/bot.rs`, `src/config.rs`, or `src/lib/`
+2. Don't touch `src/main.rs`, `src/lib/`, or `src/auth.rs`
 3. Configure the bot in `config/bot.toml`
 4. Test with `cargo check` and `cargo run`
 5. Deploy with `./deploy/install.sh` or Docker
@@ -24,6 +24,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    src/bot.rs (stable)                   │
 │  Builds VectorBot, registers handlers, runs event loop  │
+│  Initializes AuthManager from [auth] config              │
 └──────────────────────┬──────────────────────────────────┘
                        │
                        ▼
@@ -33,12 +34,20 @@
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │ commands.rs  │  │ scheduled.rs │  │ ai_bridge.rs  │  │
 │  │ !commands    │  │ cron/interval│  │ AI responses  │  │
+│  │ +auth checks │  │              │  │               │  │
 │  └─────────────┘  └──────────────┘  └───────────────┘  │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │ mod.rs — dispatch (wires it all together)        │   │
 │  └─────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
+
+Core utilities (stable — don't edit):
+┌────────────────────┐  ┌────────────────────────┐
+│ src/auth.rs        │  │ src/config.rs           │
+│ AuthManager        │  │ TOML loader             │
+│ Permission levels  │  │ + AuthSection           │
+└────────────────────┘  └────────────────────────┘
 ```
 
 **The rule:** If it's in `src/handlers/`, you edit it. If it's not, you don't.
@@ -96,6 +105,86 @@ The framework handles:
 - Dispatching to your handler
 - Error handling (logs errors, doesn't crash)
 - Routing replies to the correct channel
+
+---
+
+## Authorization System
+
+The framework has a built-in permission system so you can control who can use which commands.
+
+### Permission Levels
+
+| Level | Who | Example Commands |
+|-------|-----|------------------|
+| **Public** | Anyone | `!ping`, `!price`, `!help` |
+| **Authorized** | Owner + users added via `!add` | `!status`, `!weather` |
+| **Owner** | Only the configured owner | `!add`, `!remove`, `!shutdown` |
+
+### Setup
+
+Set the owner npub in `config/bot.toml`:
+
+```toml
+[auth]
+owner = "npub1yournpub..."
+authorized = ["npub1friend1...", "npub1friend2..."]  # optional seed list
+```
+
+When not configured, all commands are public (backward-compatible).
+
+### Built-in Auth Commands
+
+| Command | Level | Description |
+|---------|-------|-------------|
+| `!auth` | Public | Shows your authorization status |
+| `!add <npub>` | Owner | Adds a user to the authorized list |
+| `!remove <npub>` | Owner | Removes a user from the authorized list |
+| `!list` | Owner | Lists all authorized users |
+
+Authorized users persist across restarts (saved to `auth_state.json` by default).
+
+### Adding Auth to Your Commands
+
+Use the `require_auth()` helper in `src/handlers/commands.rs`:
+
+```rust
+use crate::auth::AuthLevel;
+
+// In the match block:
+
+"!price" => {
+    // Public — no auth check needed
+    price_command(ctx, msg).await?;
+}
+
+"!status" => {
+    // Authorized only — owner + added users
+    if !require_auth(ctx, msg, AuthLevel::Authorized).await? { return Ok(()); }
+    status_command(ctx, msg).await?;
+}
+
+"!shutdown" => {
+    // Owner only
+    if !require_auth(ctx, msg, AuthLevel::Owner).await? { return Ok(()); }
+    msg.reply("Shutting down...").await?;
+}
+```
+
+The `require_auth()` helper:
+- Checks the sender's npub against the AuthManager
+- Sends a ⛔ denial message if not authorized
+- Returns `Ok(false)` so you can early-return from the handler
+- If auth is not configured, always returns `Ok(true)` (backward-compatible)
+
+### Auth Config Reference
+
+```toml
+[auth]
+owner = "npub1..."           # Required to enable auth
+authorized = []              # Seed list of authorized npubs
+persist = true               # Save authorized list across restarts (default: true)
+state_file = "auth_state.json"  # Persistence file (default: auth_state.json)
+```
 
 ---
 
