@@ -1,0 +1,49 @@
+# =============================================================================
+# concord-bots.service — systemd template
+# =============================================================================
+#
+# Install:
+#   sudo cp deploy/concord-bots.service /etc/systemd/system/
+#   sudo systemctl edit concord-bots  # set WorkingDirectory and Environment
+#   sudo systemctl enable --now concord-bots
+#
+# Logs:
+#   journalctl -u concord-bots -f
+
+[Unit]
+Description=Concord Bot (Vector/Concord Protocol Bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# The binary (adjust path as needed)
+ExecStart=/usr/local/bin/concord-bots
+
+# Set the working directory to your bot project (where config/bot.toml lives)
+WorkingDirectory=/opt/concord-bots
+
+# Environment variables
+# NSEC=nsec1...                          # Bot identity (alternative to config)
+# RUST_LOG=info                          # Log level
+# BOT_CONFIG=/opt/concord-bots/config/bot.toml  # Custom config path
+Environment=RUST_LOG=info
+
+# Run as a non-root user for security
+User=concord-bot
+Group=concord-bot
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/concord-bots
+PrivateTmp=true
+
+# Restart on failure
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,74 @@
+# =============================================================================
+# bot.toml.example — Bot configuration template
+# =============================================================================
+#
+# Copy this file to config/bot.toml and edit for your bot.
+# Or set BOT_CONFIG=/path/to/bot.toml to use a custom path.
+#
+# Every field is optional. With no config, the bot auto-generates an identity
+# and requires manual invite acceptance.
+
+[bot]
+# The bot's Nostr private key (nsec).
+# Options:
+#   nsec = "nsec1..."   — use this specific key
+#   nsec = "auto"        — auto-generate on first run (default)
+#   # (omit)            — falls back to NSEC environment variable
+nsec = "auto"
+
+# Who can invite this bot to communities?
+#   "public"   — accept invites from anyone
+#   "whitelist" — only accept from npubs listed below
+#   "manual"   — requires manual acceptance (default)
+invite_policy = "manual"
+
+# Only used when invite_policy = "whitelist"
+# whitelist = [
+#   "npub1abcdef...",
+#   "npub1ghijkl...",
+# ]
+
+# Bot profile (optional — shown to users in Vector)
+# display_name = "My Awesome Bot"
+# picture = "https://example.com/avatar.png"
+# about = "A helpful Vector bot built with concord-bots"
+
+# =============================================================================
+# Communities — channels to join on startup
+# =============================================================================
+
+[communities]
+# List of community IDs to join when the bot starts.
+# You can find community IDs in Vector's UI or via the API.
+# join = [
+#   "community-id-1",
+#   "community-id-2",
+# ]
+
+# =============================================================================
+# Scheduling — default settings for scheduled tasks
+# =============================================================================
+
+[scheduling]
+# Default interval (seconds) for scheduled tasks that don't specify their own.
+# default_interval_secs = 300
+
+# =============================================================================
+# Custom — any additional config for your handlers
+# =============================================================================
+
+# Everything under [custom] is accessible via ctx.config.custom_get("key")
+# and ctx.config.custom_string("key") in your handlers.
+
+# Example: GitHub integration
+# [custom.github]
+# repo = "your-org/your-repo"
+# token = "ghp_..."
+
+# Example: AI integration (enables AI responses to non-command messages)
+# [custom.ai]
+# enabled = true
+# provider = "openclaw"          # or "openai"
+# model = "gpt-4o-mini"          # only used for OpenAI
+# system_prompt = "You are a helpful Vector community bot."
+# api_key = "sk-..."             # or set AI_API_KEY env var

@@ -1,0 +1,29 @@
+[package]
+name = "concord-bots"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A generic Vector/Concord Protocol bot template for AI agents"
+repository = "https://github.com/CentauriAgent/concord-bots"
+homepage = "https://github.com/CentauriAgent/concord-bots"
+keywords = ["vector", "nostr", "bot", "concord", "messaging"]
+categories = ["api-bindings", "network-programming"]
+
+[dependencies]
+vector_sdk = "0.3"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+once_cell = "1"
+
+# Vendor OpenSSL to avoid system dependency during build
+openssl = { version = "0.10", features = ["vendored"] }
+
+[profile.release]
+opt-level = 2
+lto = true

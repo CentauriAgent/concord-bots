@@ -1,0 +1,31 @@
+# =============================================================================
+# Echo Bot — Simplest Possible Vector Bot
+# =============================================================================
+#
+# This is a complete reference implementation showing:
+#   - !ping → "pong 🏓"
+#   - !echo <text> → echoes the text back
+#   - Scheduled: "I'm alive!" every 5 minutes (commented out)
+#
+# To use: copy this entire directory as your bot's starting point,
+# then customize the handlers.
+
+[bot]
+# Auto-generate an identity on first run.
+# Replace with your own nsec if you want a specific identity.
+nsec = "auto"
+
+# Accept invites from anyone (for testing).
+# Change to "whitelist" for production.
+invite_policy = "public"
+
+display_name = "Echo Bot"
+about = "A simple echo bot built with concord-bots"
+
+[communities]
+# Add your community IDs here to auto-join on startup.
+# join = ["your-community-id"]
+
+[scheduling]
+# Check every 5 minutes (300 seconds)
+default_interval_secs = 300

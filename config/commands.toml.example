@@ -1,0 +1,20 @@
+# =============================================================================
+# commands.toml.example — Command configuration (optional)
+# =============================================================================
+#
+# This file is for defining command metadata (aliases, descriptions, permissions).
+# It's optional — commands work without this file.
+#
+# Access values in your handlers via ctx.config.custom_get("commands").
+
+# [custom.commands]
+#
+# [custom.commands.price]
+# description = "Show current Bitcoin price"
+# aliases = ["btc", "bitcoin"]
+# cooldown_secs = 30
+#
+# [custom.commands.weather]
+# description = "Show weather for a city"
+# aliases = ["w"]
+# cooldown_secs = 10

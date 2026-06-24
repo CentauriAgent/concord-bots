@@ -1,0 +1,9 @@
+/target
+/config/bot.toml
+*.nsec
+identity.nsec
+.env
+*.swp
+*.swo
+*~
+.DS_Store
