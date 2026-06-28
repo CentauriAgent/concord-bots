@@ -31,6 +31,7 @@ pub mod scheduled;
 pub mod utility;
 pub mod wallet_cmds;
 pub mod nostr_cmds;
+pub mod moderation_cmds;
 pub mod ai_bridge;
 
 /// Called once at startup. Register scheduled tasks and any one-time setup here.

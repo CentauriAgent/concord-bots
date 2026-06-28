@@ -19,6 +19,7 @@ use crate::handlers::fun;
 use crate::handlers::utility;
 use crate::handlers::wallet_cmds;
 use crate::handlers::nostr_cmds;
+use crate::handlers::moderation_cmds;
 use crate::rate_limiter::RateLimitResult;
 
 // -----------------------------------------------------------------------------
@@ -221,6 +222,47 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         // =====================================================================
+        // MODERATION (gated by features.moderation)
+        // =====================================================================
+
+        "!kick"
+            if features.moderation => {
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
+        "!ban" | "!unban"
+            if features.moderation => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
+        "!warn" | "!warnings"
+            if features.moderation => {
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
+        "!mods"
+            if features.moderation => {
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
+        "!grantmod" | "!revokemod"
+            if features.moderation => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
         // UNKNOWN COMMAND — silently ignore
         // =====================================================================
 
@@ -315,6 +357,27 @@ async fn dispatch_nostr(
         "!nip05" => nostr_cmds::nip05_command(ctx, msg, args).await?,
         "!follow" => nostr_cmds::follow_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_nostr called with non-nostr command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch moderation commands.
+async fn dispatch_moderation(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!kick" => moderation_cmds::kick_command(ctx, msg, args).await?,
+        "!ban" => moderation_cmds::ban_command(ctx, msg, args).await?,
+        "!unban" => moderation_cmds::unban_command(ctx, msg, args).await?,
+        "!warn" => moderation_cmds::warn_command(ctx, msg, args).await?,
+        "!warnings" => moderation_cmds::warnings_command(ctx, msg, args).await?,
+        "!mods" => moderation_cmds::mods_command(ctx, msg, args).await?,
+        "!grantmod" => moderation_cmds::grantmod_command(ctx, msg, args).await?,
+        "!revokemod" => moderation_cmds::revokemod_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_moderation called with non-moderation command: {}", command),
     }
     Ok(())
 }
@@ -496,6 +559,16 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!nostr",    description: "Look up a Nostr profile",            feature: Some(Feature::Nostr), auth: AuthLevel::Public },
     CommandMeta { name: "!nip05",    description: "Verify a NIP-05 identifier",         feature: Some(Feature::Nostr), auth: AuthLevel::Public },
     CommandMeta { name: "!follow",   description: "Follow a user on Nostr",             feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
+
+    // Moderation
+    CommandMeta { name: "!kick",     description: "Kick a member",                       feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!ban",      description: "Ban a member",                        feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+    CommandMeta { name: "!unban",    description: "Lift a ban",                          feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+    CommandMeta { name: "!warn",     description: "Warn a member",                       feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!warnings", description: "Show warning history",                feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!mods",     description: "List mods/admins",                    feature: Some(Feature::Moderation), auth: AuthLevel::Public },
+    CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+    CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
 ];
 
 // =============================================================================
@@ -590,5 +663,18 @@ mod tests {
         assert!(help.contains("!add"));
         assert!(help.contains("!remove"));
         assert!(help.contains("!list"));
+    }
+
+    #[test]
+    fn test_help_text_contains_moderation_commands() {
+        let help = help_text(&FeaturesSection::default());
+        assert!(help.contains("!kick"));
+        assert!(help.contains("!ban"));
+        assert!(help.contains("!unban"));
+        assert!(help.contains("!warn"));
+        assert!(help.contains("!warnings"));
+        assert!(help.contains("!mods"));
+        assert!(help.contains("!grantmod"));
+        assert!(help.contains("!revokemod"));
     }
 }
