@@ -19,9 +19,75 @@ pub struct BotConfig {
     pub communities: CommunitiesSection,
     #[serde(default)]
     pub scheduling: SchedulingSection,
+    /// Feature flags for command groups.
+    #[serde(default)]
+    pub features: FeaturesSection,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
+}
+
+// -----------------------------------------------------------------------------
+// Features section
+// -----------------------------------------------------------------------------
+
+/// Command groups that can be toggled via `[features]` in bot.toml.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Feature {
+    Utility,
+    Fun,
+    Community,
+    Nostr,
+    Ai,
+    Moderation,
+}
+
+/// Feature flags for command groups. All default to `true` except `ai`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeaturesSection {
+    #[serde(default = "default_true")]
+    pub utility: bool,
+    #[serde(default = "default_true")]
+    pub fun: bool,
+    #[serde(default = "default_true")]
+    pub community: bool,
+    #[serde(default = "default_true")]
+    pub nostr: bool,
+    #[serde(default)]
+    pub ai: bool,
+    #[serde(default = "default_true")]
+    pub moderation: bool,
+}
+
+impl Default for FeaturesSection {
+    fn default() -> Self {
+        Self {
+            utility: true,
+            fun: true,
+            community: true,
+            nostr: true,
+            ai: false,
+            moderation: true,
+        }
+    }
+}
+
+impl FeaturesSection {
+    /// Check if a feature group is enabled.
+    pub fn is_enabled(&self, feature: Feature) -> bool {
+        match feature {
+            Feature::Utility => self.utility,
+            Feature::Fun => self.fun,
+            Feature::Community => self.community,
+            Feature::Nostr => self.nostr,
+            Feature::Ai => self.ai,
+            Feature::Moderation => self.moderation,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -187,6 +253,16 @@ impl BotConfig {
         if let Some(ref name) = self.bot.display_name {
             tracing::info!("  display_name: {}", name);
         }
+        tracing::info!("  features:");
+        tracing::info!(
+            "    utility: {}, fun: {}, community: {}, nostr: {}, ai: {}, moderation: {}",
+            self.features.utility,
+            self.features.fun,
+            self.features.community,
+            self.features.nostr,
+            self.features.ai,
+            self.features.moderation
+        );
     }
 
     /// Access a custom config value by path (e.g., "api_keys.github_token").
@@ -247,5 +323,40 @@ join = ["abc123"]
         assert!(config.auth.authorized.is_empty());
         assert!(config.auth.persist); // defaults to true
         assert_eq!(config.auth.state_file, "auth_state.json");
+    }
+
+    #[test]
+    fn test_feature_defaults() {
+        let config = BotConfig::default();
+        assert!(config.features.utility);
+        assert!(config.features.fun);
+        assert!(config.features.community);
+        assert!(config.features.nostr);
+        assert!(!config.features.ai); // disabled by default
+        assert!(config.features.moderation);
+    }
+
+    #[test]
+    fn test_feature_is_enabled() {
+        let config = BotConfig::default();
+        assert!(config.features.is_enabled(Feature::Utility));
+        assert!(config.features.is_enabled(Feature::Fun));
+        assert!(!config.features.is_enabled(Feature::Ai));
+    }
+
+    #[test]
+    fn test_feature_override() {
+        let toml_str = r#"
+[bot]
+npub = "test"
+
+[features]
+utility = false
+ai = true
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.features.utility);
+        assert!(config.features.ai);
+        assert!(config.features.fun); // still default
     }
 }

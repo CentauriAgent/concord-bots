@@ -23,6 +23,7 @@ use anyhow::Result;
 use vector_sdk::{BotEvent, VectorBot};
 
 use crate::bot::BotContext;
+use crate::config::Feature;
 
 pub mod commands;
 pub mod fun;
@@ -96,10 +97,12 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         // Someone joined a community channel.
         BotEvent::MemberJoin { channel_id, npub } => {
             tracing::info!("Member {} joined channel {}", npub, channel_id);
-            // Example: welcome new members
-            // let _ = ctx.bot.channel(channel_id.clone())
-            //     .send(&format!("Welcome {}! 🎉", npub))
-            //     .await;
+
+            // Feature gate: only send welcome if community features are enabled
+            if ctx.config.features.is_enabled(Feature::Community) {
+                let welcome = "Welcome! 🎉 Type !help to see what I can do.";
+                let _ = ctx.bot.channel(channel_id.clone()).send(welcome).await;
+            }
         }
 
         // Someone left a community channel.

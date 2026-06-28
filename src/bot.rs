@@ -9,7 +9,7 @@
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use vector_sdk::VectorBot;
+use vector_sdk::{BotEvent, VectorBot};
 
 use crate::auth::AuthManager;
 use crate::config::BotConfig;
@@ -121,35 +121,48 @@ pub async fn run(config: BotConfig) -> Result<()> {
     handlers::register(&bot, ctx.clone()).await?;
 
     // -------------------------------------------------------------------------
-    // Step 5: Message loop
+    // Step 5: Event loop (handles BOTH messages AND member joins)
     // -------------------------------------------------------------------------
-    // The SDK's on_message() call IS the event loop — it blocks forever.
-    // Do NOT also register on_event() — both call core.listen() and whichever
-    // is registered first blocks the other from ever running.
+    // Use on_event — it's a superset of on_message. Messages arrive as
+    // BotEvent::Message(IncomingMessage), joins as BotEvent::MemberJoin, etc.
+    // We must NOT also register on_message — both call core.listen() and only
+    // the first registration runs (see commit c51e4b3).
 
-    bot.on_message({
+    bot.on_event({
         let ctx = ctx.clone();
-        move |_bot, msg| {
+        move |_bot, event| {
             let ctx = ctx.clone();
             async move {
-                if msg.is_mine() {
-                    return;
-                }
+                match event {
+                    BotEvent::Message(msg) => {
+                        // Don't process our own messages.
+                        if msg.is_mine() {
+                            return;
+                        }
 
-                tracing::info!(
-                    "Incoming message from {}: {}",
-                    msg.chat_id,
-                    msg.text()
-                );
+                        tracing::info!(
+                            "Incoming message from {}: {}",
+                            msg.chat_id,
+                            msg.text()
+                        );
 
-                if let Err(e) = handlers::on_message(&ctx, &msg).await {
-                    tracing::error!("Handler error: {:?}", e);
+                        if let Err(e) = handlers::on_message(&ctx, &msg).await {
+                            tracing::error!("Handler error: {:?}", e);
+                        }
+                    }
+
+                    // All non-message events
+                    _ => {
+                        if let Err(e) = handlers::on_event(&ctx, event).await {
+                            tracing::error!("Event handler error: {:?}", e);
+                        }
+                    }
                 }
             }
         }
     })
     .await
-    .context("Failed to register on_message handler")?;
+    .context("Failed to register on_event handler")?;
 
     tracing::info!("Bot is running. Press Ctrl+C to stop.");
 

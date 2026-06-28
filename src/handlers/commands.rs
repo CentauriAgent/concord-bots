@@ -14,6 +14,7 @@ use vector_sdk::{BotEvent, IncomingMessage};
 
 use crate::auth::AuthLevel;
 use crate::bot::BotContext;
+use crate::config::{Feature, FeaturesSection};
 use crate::handlers::fun;
 use crate::handlers::utility;
 use crate::rate_limiter::RateLimitResult;
@@ -81,9 +82,11 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
     }
 
+    let features = &ctx.config.features;
+
     match command {
         // =====================================================================
-        // BUILT-IN COMMANDS (Public)
+        // CORE (always enabled)
         // =====================================================================
 
         "!ping" => {
@@ -91,7 +94,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         "!help" => {
-            msg.reply(&help_text()).await?;
+            msg.reply(&help_text(&ctx.config.features)).await?;
         }
 
         "!echo" => {
@@ -117,87 +120,27 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         // =====================================================================
-        // UTILITY COMMANDS (Public)
+        // UTILITY (gated by features.utility)
         // =====================================================================
 
-        "!price" => {
-            utility::price_command(ctx, msg).await?;
-        }
-
-        "!time" => {
-            utility::time_command(ctx, msg, args).await?;
-        }
-
-        "!roll" => {
-            utility::roll_command(ctx, msg, args).await?;
-        }
-
-        "!stats" => {
-            utility::stats_command(ctx, msg).await?;
-        }
-
-        "!weather" => {
-            utility::weather_command(ctx, msg, args).await?;
-        }
-
-        "!remind" => {
-            utility::remind_command(ctx, msg, args).await?;
-        }
-
-        "!poll" => {
-            utility::poll_command(ctx, msg, args).await?;
-        }
-
-        "!translate" => {
-            utility::translate_command(ctx, msg, args).await?;
-        }
-
-        "!define" => {
-            utility::define_command(ctx, msg, args).await?;
-        }
-
-        "!quote" => {
-            utility::quote_command(ctx, msg).await?;
-        }
-
-        "!joke" => {
-            utility::joke_command(ctx, msg).await?;
-        }
-
-        "!fact" => {
-            utility::fact_command(ctx, msg).await?;
-        }
-
-        "!meme" => {
-            utility::meme_command(ctx, msg).await?;
-        }
-
-        "!shorten" => {
-            utility::shorten_command(ctx, msg, args).await?;
+        "!price" | "!time" | "!roll" | "!stats" | "!weather"
+        | "!remind" | "!poll" | "!translate" | "!define" | "!quote"
+        | "!joke" | "!fact" | "!meme" | "!shorten"
+            if features.utility => {
+            dispatch_utility(ctx, msg, command, args).await?;
         }
 
         // =====================================================================
-        // FUN COMMANDS (Public)
+        // FUN (gated by features.fun)
         // =====================================================================
 
-        "!8ball" => {
-            fun::eight_ball_command(ctx, msg, args).await?;
-        }
-
-        "!flip" => {
-            fun::flip_command(ctx, msg).await?;
-        }
-
-        "!choose" => {
-            fun::choose_command(ctx, msg, args).await?;
-        }
-
-        "!rps" => {
-            fun::rps_command(ctx, msg, args).await?;
+        "!8ball" | "!flip" | "!choose" | "!rps"
+            if features.fun => {
+            dispatch_fun(ctx, msg, command, args).await?;
         }
 
         // =====================================================================
-        // AUTH MANAGEMENT (Owner only)
+        // AUTH MANAGEMENT (always enabled, owner-only)
         // =====================================================================
 
         "!add" => {
@@ -235,6 +178,54 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
 
 /// Handle non-message events for commands (typically unused).
 pub async fn on_event(_ctx: &BotContext, _event: &BotEvent) -> Result<()> {
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Feature-gated dispatch helpers
+// -----------------------------------------------------------------------------
+
+/// Dispatch utility commands by feature gate.
+async fn dispatch_utility(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!price" => utility::price_command(ctx, msg).await?,
+        "!time" => utility::time_command(ctx, msg, args).await?,
+        "!roll" => utility::roll_command(ctx, msg, args).await?,
+        "!stats" => utility::stats_command(ctx, msg).await?,
+        "!weather" => utility::weather_command(ctx, msg, args).await?,
+        "!remind" => utility::remind_command(ctx, msg, args).await?,
+        "!poll" => utility::poll_command(ctx, msg, args).await?,
+        "!translate" => utility::translate_command(ctx, msg, args).await?,
+        "!define" => utility::define_command(ctx, msg, args).await?,
+        "!quote" => utility::quote_command(ctx, msg).await?,
+        "!joke" => utility::joke_command(ctx, msg).await?,
+        "!fact" => utility::fact_command(ctx, msg).await?,
+        "!meme" => utility::meme_command(ctx, msg).await?,
+        "!shorten" => utility::shorten_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_utility called with non-utility command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch fun commands by feature gate.
+async fn dispatch_fun(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!8ball" => fun::eight_ball_command(ctx, msg, args).await?,
+        "!flip" => fun::flip_command(ctx, msg).await?,
+        "!choose" => fun::choose_command(ctx, msg, args).await?,
+        "!rps" => fun::rps_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_fun called with non-fun command: {}", command),
+    }
     Ok(())
 }
 
@@ -359,56 +350,97 @@ async fn list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
 }
 
 // =============================================================================
-// HELP TEXT
+// COMMAND REGISTRY — single source of truth for help generation
 // =============================================================================
 
-fn help_text() -> String {
-    let groups = [
-        ("📋 General", vec![
-            ("!ping", "Health check"),
-            ("!help", "Show this help"),
-            ("!whoami", "Bot identity"),
-            ("!auth", "Your auth status"),
-            ("!stats", "Bot statistics"),
-        ]),
-        ("🛠️ Utility", vec![
-            ("!price", "Bitcoin price (USD)"),
-            ("!time [tz]", "Current time (e.g. !time US/Eastern)"),
-            ("!roll [NdS]", "Dice — !roll, !roll 20, !roll 3d6"),
-            ("!weather <zip>", "Weather for a US zipcode"),
-            ("!remind <time> <msg>", "Set a reminder (30m, 2h, 1d)"),
-            ("!poll <q> | a | b", "Create a poll"),
-            ("!translate <lang> <text>", "Translate text (e.g. !translate es Hi)"),
-            ("!define <word>", "Dictionary definition"),
-            ("!quote", "Random inspirational quote"),
-            ("!joke", "Random dad joke"),
-            ("!fact", "Random fun fact"),
-            ("!meme", "Random meme"),
-            ("!shorten <url>", "Shorten a URL"),
-        ]),
-        ("🎮 Fun", vec![
-            ("!8ball <q>", "Magic 8-ball"),
-            ("!flip", "Flip a coin"),
-            ("!choose <a|b|c>", "Pick randomly"),
-            ("!rps <r|p|s>", "Rock paper scissors"),
-        ]),
-        ("🔐 Owner", vec![
-            ("!add <npub>", "Authorize a user"),
-            ("!remove <npub>", "Deauthorize a user"),
-            ("!list", "List authorized users"),
-        ]),
+/// Metadata for a single command, for help generation and feature gating.
+struct CommandMeta {
+    name: &'static str,
+    description: &'static str,
+    feature: Option<Feature>, // None = always-on (core commands)
+    auth: AuthLevel,
+}
+
+/// Single source of truth for all commands.
+const COMMAND_REGISTRY: &[CommandMeta] = &[
+    // Core (always enabled)
+    CommandMeta { name: "!ping",     description: "Health check",                       feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!help",     description: "Show this help",                     feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!echo",     description: "Echo text back",                     feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!whoami",   description: "Bot identity",                       feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!auth",     description: "Your auth status",                   feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!stats",    description: "Bot statistics",                     feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!add",      description: "Authorize a user",                   feature: None, auth: AuthLevel::Owner },
+    CommandMeta { name: "!remove",   description: "Deauthorize a user",                 feature: None, auth: AuthLevel::Owner },
+    CommandMeta { name: "!list",     description: "List authorized users",              feature: None, auth: AuthLevel::Owner },
+
+    // Utility
+    CommandMeta { name: "!price",    description: "Bitcoin price (USD)",                feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!time",     description: "Current time [timezone]",            feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!roll",     description: "Dice roller [NdS]",                  feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!weather",  description: "Weather <zipcode>",                  feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!remind",   description: "Set a reminder",                    feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!poll",     description: "Create a poll",                     feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!translate", description: "Translate <lang> <text>",          feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!define",   description: "Dictionary definition",             feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!quote",    description: "Random inspirational quote",        feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!joke",     description: "Random dad joke",                   feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!fact",     description: "Random fun fact",                  feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!meme",     description: "Random meme",                      feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!shorten",  description: "Shorten a URL",                   feature: Some(Feature::Utility), auth: AuthLevel::Public },
+
+    // Fun
+    CommandMeta { name: "!8ball",    description: "Magic 8-ball",                     feature: Some(Feature::Fun), auth: AuthLevel::Public },
+    CommandMeta { name: "!flip",     description: "Flip a coin",                     feature: Some(Feature::Fun), auth: AuthLevel::Public },
+    CommandMeta { name: "!choose",   description: "Pick randomly",                  feature: Some(Feature::Fun), auth: AuthLevel::Public },
+    CommandMeta { name: "!rps",      description: "Rock paper scissors",           feature: Some(Feature::Fun), auth: AuthLevel::Public },
+];
+
+// =============================================================================
+// HELP TEXT — generated from COMMAND_REGISTRY, filtered by feature flags
+// =============================================================================
+
+fn help_text(features: &FeaturesSection) -> String {
+    // Group commands by feature category.
+    let mut sections: Vec<(&str, Vec<&CommandMeta>)> = vec![
+        ("📋 General", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature.is_none() && c.auth != AuthLevel::Owner)
+            .collect()),
+        ("🛠️ Utility", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Utility) && features.is_enabled(Feature::Utility))
+            .collect()),
+        ("🎮 Fun", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Fun) && features.is_enabled(Feature::Fun))
+            .collect()),
+        ("🌟 Community", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Community) && features.is_enabled(Feature::Community))
+            .collect()),
+        ("⚡ Nostr", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Nostr) && features.is_enabled(Feature::Nostr))
+            .collect()),
+        ("🤖 AI", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Ai) && features.is_enabled(Feature::Ai))
+            .collect()),
+        ("🛡️ Moderation", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::Moderation) && features.is_enabled(Feature::Moderation))
+            .collect()),
+        ("🔐 Owner", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature.is_none() && c.auth == AuthLevel::Owner)
+            .collect()),
     ];
 
-    let mut sections = Vec::new();
-    for (header, cmds) in &groups {
-        let lines: Vec<String> = cmds
-            .iter()
-            .map(|(cmd, desc)| format!("  {} — {}", cmd, desc))
+    // Remove empty sections.
+    sections.retain(|(_, cmds)| !cmds.is_empty());
+
+    let mut parts = Vec::new();
+    for (header, cmds) in &sections {
+        let lines: Vec<String> = cmds.iter()
+            .map(|c| format!("  {} — {}", c.name, c.description))
             .collect();
-        sections.push(format!("{}\n{}", header, lines.join("\n")));
+        parts.push(format!("{}\n{}", header, lines.join("\n")));
     }
 
-    format!("Available commands:\n\n{}", sections.join("\n\n"))
+    format!("Available commands:\n\n{}", parts.join("\n\n"))
 }
 
 // =============================================================================
@@ -421,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_help_text_contains_all_commands() {
-        let help = help_text();
+        let help = help_text(&FeaturesSection::default());
         // General
         assert!(help.contains("!ping"));
         assert!(help.contains("!help"));
