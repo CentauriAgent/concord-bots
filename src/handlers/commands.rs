@@ -262,6 +262,24 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             dispatch_moderation(ctx, msg, command, args).await?;
         }
 
+        "!welcome"
+            if features.community => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            let enabled = match args.trim() {
+                "on" => { crate::handlers::set_welcome_enabled(true); true }
+                "off" => { crate::handlers::set_welcome_enabled(false); false }
+                _ => {
+                    let state = if crate::handlers::is_welcome_enabled() { "on" } else { "off" };
+                    msg.reply(&format!("Welcome messages are currently **{}**. Usage: !welcome on/off", state)).await?;
+                    return Ok(());
+                }
+            };
+            let state = if enabled { "ON ✅" } else { "OFF ❌" };
+            msg.reply(&format!("Welcome messages turned {}", state)).await?;
+        }
+
         // =====================================================================
         // UNKNOWN COMMAND — silently ignore
         // =====================================================================
@@ -567,6 +585,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!warn",     description: "Warn a member",                       feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
     CommandMeta { name: "!warnings", description: "Show warning history",                feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
     CommandMeta { name: "!mods",     description: "List mods/admins",                    feature: Some(Feature::Moderation), auth: AuthLevel::Public },
+    CommandMeta { name: "!welcome", description: "Toggle welcome messages on/off",       feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
 ];

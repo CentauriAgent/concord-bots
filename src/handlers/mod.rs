@@ -37,6 +37,20 @@ static WELCOMED: Lazy<Mutex<HashMap<(String, String), Instant>>> =
 /// Minimum time between welcomes for the same member in the same channel.
 const WELCOME_COOLDOWN: Duration = Duration::from_secs(3600); // 1 hour
 
+/// Whether welcome messages are enabled (toggleable via !welcome on/off).
+static WELCOME_ENABLED: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(true));
+
+/// Set welcome message on/off. Called from the command handler.
+pub fn set_welcome_enabled(enabled: bool) {
+    let mut state = WELCOME_ENABLED.lock().unwrap();
+    *state = enabled;
+}
+
+/// Check if welcome messages are currently enabled.
+pub fn is_welcome_enabled() -> bool {
+    *WELCOME_ENABLED.lock().unwrap()
+}
+
 pub mod commands;
 pub mod fun;
 pub mod scheduled;
@@ -118,8 +132,8 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
                 return Ok(());
             }
 
-            // Feature gate: only send welcome if community features are enabled
-            if ctx.config.features.is_enabled(Feature::Community) {
+            // Feature gate: only send welcome if community features are enabled AND welcome is on
+            if ctx.config.features.is_enabled(Feature::Community) && is_welcome_enabled() {
                 // Dedup: only welcome once per member per channel per hour
                 let key = (channel_id.clone(), npub.clone());
                 let should_welcome = {
