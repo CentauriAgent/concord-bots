@@ -123,35 +123,10 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // -------------------------------------------------------------------------
     // Step 5: Message loop
     // -------------------------------------------------------------------------
-    // IMPORTANT: The SDK's on_message() call IS the event loop — it blocks
-    // forever running the relay notification dispatcher. Register on_event
-    // BEFORE on_message so it doesn't get starved.
-    //
-    // Actually, looking at the SDK source: on_message() calls core.listen()
-    // which blocks. But on_event() is registered via a separate notification
-    // handler inside the same listen() loop. So the ORDER of registration
-    // doesn't actually matter for the SDK's internal dispatch — both are
-    // handled within the same notification callback. However, we keep
-    // on_event registration before on_message for clarity.
+    // The SDK's on_message() call IS the event loop — it blocks forever.
+    // Do NOT also register on_event() — both call core.listen() and whichever
+    // is registered first blocks the other from ever running.
 
-    // Register the event handler for non-message events (joins, reactions, etc.)
-    // This is registered first but both handlers are dispatched from the same
-    // notification loop inside the SDK.
-    bot.on_event({
-        let ctx = ctx.clone();
-        move |_bot, event| {
-            let ctx = ctx.clone();
-            async move {
-                if let Err(e) = handlers::on_event(&ctx, event).await {
-                    tracing::error!("Event handler error: {:?}", e);
-                }
-            }
-        }
-    })
-    .await
-    .context("Failed to register on_event handler")?;
-
-    // The on_message handler — this BLOCKS until the bot shuts down.
     bot.on_message({
         let ctx = ctx.clone();
         move |_bot, msg| {
@@ -161,8 +136,8 @@ pub async fn run(config: BotConfig) -> Result<()> {
                     return;
                 }
 
-                tracing::debug!(
-                    "Message from {}: {}",
+                tracing::info!(
+                    "Incoming message from {}: {}",
                     msg.chat_id,
                     msg.text()
                 );
