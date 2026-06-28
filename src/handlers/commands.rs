@@ -170,8 +170,27 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         // WALLET (gated by features.nostr — Cashu is a Nostr-adjacent feature)
         // =====================================================================
 
-        "!balance" | "!tip" | "!deposit" | "!withdraw"
+        "!balance" | "!withdraw"
             if features.nostr => {
+            // Owner-only: viewing balance and draining wallet
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            dispatch_wallet(ctx, msg, command, args).await?;
+        }
+
+        "!tip"
+            if features.nostr => {
+            // Authorized+: community members can tip, lurkers can't drain
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            dispatch_wallet(ctx, msg, command, args).await?;
+        }
+
+        "!deposit"
+            if features.nostr => {
+            // Public: anyone can fund the bot
             dispatch_wallet(ctx, msg, command, args).await?;
         }
 
@@ -457,10 +476,10 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!rps",      description: "Rock paper scissors",           feature: Some(Feature::Fun), auth: AuthLevel::Public },
 
     // Wallet (gated by Nostr feature)
-    CommandMeta { name: "!balance",  description: "Show Cashu wallet balance",         feature: Some(Feature::Nostr), auth: AuthLevel::Public },
-    CommandMeta { name: "!tip",      description: "Tip sats as Cashu token",           feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!balance",  description: "Show Cashu wallet balance",         feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
+    CommandMeta { name: "!tip",      description: "Tip sats as Cashu token",           feature: Some(Feature::Nostr), auth: AuthLevel::Authorized },
     CommandMeta { name: "!deposit",  description: "Generate Lightning deposit invoice", feature: Some(Feature::Nostr), auth: AuthLevel::Public },
-    CommandMeta { name: "!withdraw", description: "Pay Lightning invoice from wallet", feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!withdraw", description: "Pay Lightning invoice from wallet", feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
 
     // Nostr
     CommandMeta { name: "!nostr",    description: "Look up a Nostr profile",            feature: Some(Feature::Nostr), auth: AuthLevel::Public },
