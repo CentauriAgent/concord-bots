@@ -101,6 +101,11 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MemberJoin { channel_id, npub } => {
             tracing::info!("Member {} joined channel {}", npub, channel_id);
 
+            // Don't welcome ourselves
+            if npub == ctx.bot.npub() {
+                return Ok(());
+            }
+
             // Feature gate: only send welcome if community features are enabled
             if ctx.config.features.is_enabled(Feature::Community) {
                 let welcome = "Welcome! 🎉 Type !help to see what I can do.";
