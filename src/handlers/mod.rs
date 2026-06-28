@@ -20,10 +20,22 @@
 // You can also create new handler files and register them here.
 
 use anyhow::Result;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use once_cell::sync::Lazy;
 use vector_sdk::{BotEvent, VectorBot};
 
 use crate::bot::BotContext;
 use crate::config::Feature;
+
+/// Track recently welcomed members to prevent duplicate welcomes.
+/// Maps (channel_id, npub) -> last welcome time.
+static WELCOMED: Lazy<Mutex<HashMap<(String, String), Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Minimum time between welcomes for the same member in the same channel.
+const WELCOME_COOLDOWN: Duration = Duration::from_secs(3600); // 1 hour
 
 pub mod commands;
 pub mod fun;
@@ -108,8 +120,27 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
 
             // Feature gate: only send welcome if community features are enabled
             if ctx.config.features.is_enabled(Feature::Community) {
-                let welcome = "Welcome! 🎉 Type !help to see what I can do.";
-                let _ = ctx.bot.channel(channel_id.clone()).send(welcome).await;
+                // Dedup: only welcome once per member per channel per hour
+                let key = (channel_id.clone(), npub.clone());
+                let should_welcome = {
+                    let mut map = WELCOMED.lock().unwrap();
+                    if let Some(last) = map.get(&key) {
+                        if last.elapsed() < WELCOME_COOLDOWN {
+                            false
+                        } else {
+                            map.insert(key.clone(), Instant::now());
+                            true
+                        }
+                    } else {
+                        map.insert(key.clone(), Instant::now());
+                        true
+                    }
+                };
+
+                if should_welcome {
+                    let welcome = "Welcome! 🎉 Type !help to see what I can do.";
+                    let _ = ctx.bot.channel(channel_id.clone()).send(welcome).await;
+                }
             }
         }
 
