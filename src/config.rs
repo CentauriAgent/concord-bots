@@ -22,6 +22,9 @@ pub struct BotConfig {
     /// Feature flags for command groups.
     #[serde(default)]
     pub features: FeaturesSection,
+    /// Cashu wallet configuration.
+    #[serde(default)]
+    pub wallet: WalletSection,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -279,6 +282,34 @@ impl BotConfig {
     pub fn custom_string(&self, key: &str) -> Option<String> {
         self.custom_get(key)?.as_str().map(|s| s.to_string())
     }
+}
+
+// -----------------------------------------------------------------------------
+// Wallet section
+// -----------------------------------------------------------------------------
+
+/// Cashu wallet configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletSection {
+    /// Enable the Cashu wallet (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Mint URL for the Cashu mint.
+    #[serde(default = "default_mint_url")]
+    pub mint_url: String,
+}
+
+impl Default for WalletSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mint_url: default_mint_url(),
+        }
+    }
+}
+
+fn default_mint_url() -> String {
+    "https://mint.minibits.cash/Bitcoin".to_string()
 }
 
 #[cfg(test)]

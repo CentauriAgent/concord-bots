@@ -110,9 +110,32 @@ mint_url = "https://mint.minibits.cash"
 | Docker + deploy | `clawd-pju.11` | blocked by 7 |
 | Documentation site | `clawd-pju.12` | blocked by 10, 11 |
 
-**Moderation:**
-- `!kick`, `!warn`, `!purge`
-- Auto-mod (spam/link/slur filtering)
+**Moderation (Concord-native, uses SDK role system):**
+
+Phase 1 — Core commands:
+- `!kick <npub>` — Authorized+. Cooperative kick (can rejoin). Uses `member.kick()`
+- `!ban <npub>` — Owner only. Terminal ban. Uses `member.ban()`
+- `!unban <npub>` — Owner only. Lifts ban.
+- `!warn <npub> <reason>` — Authorized+. Logs warning (SQLite, no protocol action)
+- `!warnings <npub>` — Authorized+. Show warning history
+- `!mods` — Public. Lists current mods/admins from `community.roles()`
+- `!grantmod <npub>` — Owner only. Uses `member.grant_admin()` (no underscore!)
+- `!revokemod <npub>` — Owner only. Uses `member.revoke_admin()`
+
+Phase 2 — Auto-mod (config-driven):
+- Word filter (auto-kick on blacklisted words)
+- Link blocking (warn then kick)
+- Spam protection (extend rate limiter to auto-kick repeat offenders)
+- All auto-mod respects Concord auth (bot needs KICK permission in community)
+
+Two-layer auth:
+1. Bot auth: Is user allowed to use !ban? (Owner/Authorized)
+2. Community auth: Does bot have BAN permission? (Concord role system)
+
+Protocol limitations:
+- Cannot delete others' messages (only own)
+- No timeout/mute (kick or ban only)
+- No slow-mode (per-bot rate limit only)
 
 **Infrastructure:**
 - Multi-stage Dockerfile

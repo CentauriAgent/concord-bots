@@ -80,6 +80,22 @@ invite_policy = "manual"
 # default_interval_secs = 300
 
 # =============================================================================
+# Wallet — Cashu ecash wallet for tips, deposits, and Lightning payments
+# =============================================================================
+
+[wallet]
+# Enable the built-in Cashu wallet (default: false).
+# When enabled, the bot can receive Lightning payments and send Cashu tokens.
+# Commands: !balance, !tip <sats>, !deposit [sats], !withdraw <invoice>
+# enabled = false
+
+# Mint URL for the Cashu mint (default: minibits).
+# Other popular mints:
+#   "https://8333.space:3338" (bitcoin space)
+#   "https://stablenut.umint.cash" (test mint)
+# mint_url = "https://mint.minibits.cash/Bitcoin"
+
+# =============================================================================
 # Custom — any additional config for your handlers
 # =============================================================================
 

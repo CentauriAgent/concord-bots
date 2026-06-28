@@ -17,6 +17,8 @@ use crate::bot::BotContext;
 use crate::config::{Feature, FeaturesSection};
 use crate::handlers::fun;
 use crate::handlers::utility;
+use crate::handlers::wallet_cmds;
+use crate::handlers::nostr_cmds;
 use crate::rate_limiter::RateLimitResult;
 
 // -----------------------------------------------------------------------------
@@ -165,6 +167,32 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         // =====================================================================
+        // WALLET (gated by features.nostr — Cashu is a Nostr-adjacent feature)
+        // =====================================================================
+
+        "!balance" | "!tip" | "!deposit" | "!withdraw"
+            if features.nostr => {
+            dispatch_wallet(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
+        // NOSTR (gated by features.nostr)
+        // =====================================================================
+
+        "!nostr" | "!nip05"
+            if features.nostr => {
+            dispatch_nostr(ctx, msg, command, args).await?;
+        }
+
+        "!follow"
+            if features.nostr => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            dispatch_nostr(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
         // UNKNOWN COMMAND — silently ignore
         // =====================================================================
 
@@ -225,6 +253,39 @@ async fn dispatch_fun(
         "!choose" => fun::choose_command(ctx, msg, args).await?,
         "!rps" => fun::rps_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_fun called with non-fun command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch wallet commands.
+async fn dispatch_wallet(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!balance" => wallet_cmds::balance_command(ctx, msg).await?,
+        "!tip" => wallet_cmds::tip_command(ctx, msg, args).await?,
+        "!deposit" => wallet_cmds::deposit_command(ctx, msg, args).await?,
+        "!withdraw" => wallet_cmds::withdraw_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_wallet called with non-wallet command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch Nostr commands.
+async fn dispatch_nostr(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!nostr" => nostr_cmds::nostr_command(ctx, msg, args).await?,
+        "!nip05" => nostr_cmds::nip05_command(ctx, msg, args).await?,
+        "!follow" => nostr_cmds::follow_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_nostr called with non-nostr command: {}", command),
     }
     Ok(())
 }
@@ -394,6 +455,17 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!flip",     description: "Flip a coin",                     feature: Some(Feature::Fun), auth: AuthLevel::Public },
     CommandMeta { name: "!choose",   description: "Pick randomly",                  feature: Some(Feature::Fun), auth: AuthLevel::Public },
     CommandMeta { name: "!rps",      description: "Rock paper scissors",           feature: Some(Feature::Fun), auth: AuthLevel::Public },
+
+    // Wallet (gated by Nostr feature)
+    CommandMeta { name: "!balance",  description: "Show Cashu wallet balance",         feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!tip",      description: "Tip sats as Cashu token",           feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!deposit",  description: "Generate Lightning deposit invoice", feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!withdraw", description: "Pay Lightning invoice from wallet", feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+
+    // Nostr
+    CommandMeta { name: "!nostr",    description: "Look up a Nostr profile",            feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!nip05",    description: "Verify a NIP-05 identifier",         feature: Some(Feature::Nostr), auth: AuthLevel::Public },
+    CommandMeta { name: "!follow",   description: "Follow a user on Nostr",             feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
 ];
 
 // =============================================================================
@@ -478,6 +550,11 @@ mod tests {
         assert!(help.contains("!flip"));
         assert!(help.contains("!choose"));
         assert!(help.contains("!rps"));
+        // Wallet
+        assert!(help.contains("!balance"));
+        assert!(help.contains("!tip"));
+        assert!(help.contains("!deposit"));
+        assert!(help.contains("!withdraw"));
         // Owner
         assert!(help.contains("!add"));
         assert!(help.contains("!remove"));

@@ -15,6 +15,7 @@ use crate::auth::AuthManager;
 use crate::config::BotConfig;
 use crate::handlers;
 use crate::rate_limiter::RateLimiter;
+use crate::wallet::CashuWallet;
 
 /// Shared context passed to all handlers.
 #[derive(Clone)]
@@ -27,6 +28,8 @@ pub struct BotContext {
     pub auth: Option<AuthManager>,
     /// Per-user spam protection.
     pub rate_limiter: RateLimiter,
+    /// Cashu wallet (None if not configured).
+    pub wallet: Option<Arc<CashuWallet>>,
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -104,6 +107,29 @@ pub async fn run(config: BotConfig) -> Result<()> {
     };
 
     // -------------------------------------------------------------------------
+    // Step 2b: Initialize Cashu wallet (optional)
+    // -------------------------------------------------------------------------
+
+    let wallet = if config.wallet.enabled {
+        let data_dir = std::path::PathBuf::from(
+            std::env::var("WALLET_DATA_DIR").unwrap_or_else(|_| "./data".to_string())
+        );
+        match CashuWallet::init(&data_dir, &config.wallet.mint_url).await {
+            Ok(w) => {
+                tracing::info!("Cashu wallet initialized — mint: {}", config.wallet.mint_url);
+                Some(Arc::new(w))
+            }
+            Err(e) => {
+                tracing::error!("Failed to init Cashu wallet: {:?}", e);
+                None
+            }
+        }
+    } else {
+        tracing::info!("Cashu wallet disabled (config [wallet] enabled = false)");
+        None
+    };
+
+    // -------------------------------------------------------------------------
     // Step 3: Create shared context
     // -------------------------------------------------------------------------
 
@@ -112,6 +138,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         config: Arc::new(config),
         auth,
         rate_limiter: RateLimiter::default(),
+        wallet,
     };
 
     // -------------------------------------------------------------------------
