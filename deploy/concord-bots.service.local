@@ -1,0 +1,19 @@
+[Unit]
+Description=Concord Bot (Vector/Concord Protocol)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/moltbot/projects/concord-bots/target/debug/concord-bots
+WorkingDirectory=/home/moltbot/projects/concord-bots
+Environment=RUST_LOG=info,nostr_relay_pool=warn
+Environment=BOT_CONFIG=/home/moltbot/projects/concord-bots/config/bot.toml
+User=moltbot
+Group=moltbot
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

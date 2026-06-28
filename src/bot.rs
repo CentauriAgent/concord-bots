@@ -1,14 +1,11 @@
 // =============================================================================
-// bot.rs — Vector connection and message loop (STABLE — do not edit)
+// bot.rs — Vector connection and message loop
 // =============================================================================
 //
-// This module handles:
+// Handles:
 //   1. Building the VectorBot from config
 //   2. Registering handlers (commands, scheduled tasks, AI bridge)
 //   3. Running the bot until shutdown
-//
-// You should NOT need to edit this file. All customization is done via
-// the handlers/ module and config/bot.toml.
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -17,20 +14,19 @@ use vector_sdk::VectorBot;
 use crate::auth::AuthManager;
 use crate::config::BotConfig;
 use crate::handlers;
+use crate::rate_limiter::RateLimiter;
 
 /// Shared context passed to all handlers.
-///
-/// This is what your handler functions use to access the bot,
-/// send messages, and read configuration. Clone it freely.
 #[derive(Clone)]
 pub struct BotContext {
-    /// The Vector bot instance — use this to send messages, join channels, etc.
+    /// The Vector bot instance.
     pub bot: VectorBot,
     /// The parsed bot.toml configuration.
     pub config: Arc<BotConfig>,
     /// Authorization manager (None if auth is not configured).
-    /// Use this in command handlers to check permissions.
     pub auth: Option<AuthManager>,
+    /// Per-user spam protection.
+    pub rate_limiter: RateLimiter,
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -43,7 +39,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
     let mut builder = VectorBot::builder();
 
-    // Set identity: explicit nsec from config, or NSEC env var, or auto-generate.
     let nsec = config.bot_nsec();
 
     if let Some(ref n) = nsec {
@@ -51,10 +46,8 @@ pub async fn run(config: BotConfig) -> Result<()> {
         builder = builder.nsec(n);
     } else {
         tracing::info!("No nsec provided — bot will auto-generate and persist an identity");
-        // The SDK auto-generates and stores identity.nsec when no key is given.
     }
 
-    // Set invite policy: public, whitelist, or manual (default).
     match config.invite_policy() {
         crate::config::InvitePolicyConfig::Public => {
             tracing::info!("Invite policy: public (accept all invites)");
@@ -69,7 +62,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
         }
     }
 
-    // Build the bot.
     let bot = builder
         .build()
         .await
@@ -78,7 +70,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
     tracing::info!("Bot online as {}", bot.npub());
 
     // -------------------------------------------------------------------------
-    // Step 2: Initialize auth system (if configured)
+    // Step 2: Initialize auth system
     // -------------------------------------------------------------------------
 
     let auth = if let Some(ref owner) = config.auth.owner {
@@ -112,56 +104,39 @@ pub async fn run(config: BotConfig) -> Result<()> {
     };
 
     // -------------------------------------------------------------------------
-    // Step 3: Create shared context and register handlers
+    // Step 3: Create shared context
     // -------------------------------------------------------------------------
 
     let ctx = BotContext {
         bot: bot.clone(),
         config: Arc::new(config),
         auth,
+        rate_limiter: RateLimiter::default(),
     };
 
     // -------------------------------------------------------------------------
-    // Step 4: Register all handlers (commands, scheduled tasks, AI bridge)
+    // Step 4: Register all handlers
     // -------------------------------------------------------------------------
 
-    // Register all handlers (commands, scheduled tasks, AI bridge).
-    // This is where your custom code gets wired in.
     handlers::register(&bot, ctx.clone()).await?;
 
     // -------------------------------------------------------------------------
-    // Step 5: Message loop — run until interrupted
+    // Step 5: Message loop
     // -------------------------------------------------------------------------
+    // IMPORTANT: The SDK's on_message() call IS the event loop — it blocks
+    // forever running the relay notification dispatcher. Register on_event
+    // BEFORE on_message so it doesn't get starved.
+    //
+    // Actually, looking at the SDK source: on_message() calls core.listen()
+    // which blocks. But on_event() is registered via a separate notification
+    // handler inside the same listen() loop. So the ORDER of registration
+    // doesn't actually matter for the SDK's internal dispatch — both are
+    // handled within the same notification callback. However, we keep
+    // on_event registration before on_message for clarity.
 
-    // The on_message handler is the main entry point for incoming messages.
-    // It dispatches to command handlers and custom logic.
-    bot.on_message({
-        let ctx = ctx.clone();
-        move |_bot, msg| {
-            let ctx = ctx.clone();
-            async move {
-                // Skip our own messages to prevent loops.
-                if msg.is_mine() {
-                    return;
-                }
-
-                tracing::debug!(
-                    "Message from {}: {}",
-                    msg.chat_id,
-                    msg.text()
-                );
-
-                // Dispatch to the handler module.
-                if let Err(e) = handlers::on_message(&ctx, &msg).await {
-                    tracing::error!("Handler error: {:?}", e);
-                }
-            }
-        }
-    })
-    .await
-    .context("Failed to register on_message handler")?;
-
-    // Also register the event handler for non-message events (joins, reactions, etc.)
+    // Register the event handler for non-message events (joins, reactions, etc.)
+    // This is registered first but both handlers are dispatched from the same
+    // notification loop inside the SDK.
     bot.on_event({
         let ctx = ctx.clone();
         move |_bot, event| {
@@ -176,10 +151,33 @@ pub async fn run(config: BotConfig) -> Result<()> {
     .await
     .context("Failed to register on_event handler")?;
 
+    // The on_message handler — this BLOCKS until the bot shuts down.
+    bot.on_message({
+        let ctx = ctx.clone();
+        move |_bot, msg| {
+            let ctx = ctx.clone();
+            async move {
+                if msg.is_mine() {
+                    return;
+                }
+
+                tracing::debug!(
+                    "Message from {}: {}",
+                    msg.chat_id,
+                    msg.text()
+                );
+
+                if let Err(e) = handlers::on_message(&ctx, &msg).await {
+                    tracing::error!("Handler error: {:?}", e);
+                }
+            }
+        }
+    })
+    .await
+    .context("Failed to register on_message handler")?;
+
     tracing::info!("Bot is running. Press Ctrl+C to stop.");
 
-    // Keep the process alive. The bot runs in the background via SDK internals.
-    // We just need to not exit.
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for Ctrl+C")?;

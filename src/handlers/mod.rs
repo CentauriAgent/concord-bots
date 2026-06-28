@@ -25,7 +25,9 @@ use vector_sdk::{BotEvent, VectorBot};
 use crate::bot::BotContext;
 
 pub mod commands;
+pub mod fun;
 pub mod scheduled;
+pub mod utility;
 pub mod ai_bridge;
 
 /// Called once at startup. Register scheduled tasks and any one-time setup here.

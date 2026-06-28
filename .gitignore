@@ -7,3 +7,4 @@ identity.nsec
 *.swo
 *~
 .DS_Store
+auth_state.json

@@ -14,6 +14,7 @@ mod bot;
 mod config;
 mod handlers;
 mod lib;
+mod rate_limiter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
