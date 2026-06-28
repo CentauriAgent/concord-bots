@@ -1,11 +1,58 @@
 # Cashu Wallet Integration Design — v0.4.0
 
 **Research source:** [cashubtc/cdk](https://github.com/cashubtc/cdk) (official Cashu Development Kit)
-**Crate:** `cdk = "0.17"` + `cdk-sqlite` + `cdk-http-client` (all MIT, maintained by cashubtc org)
+**Status:** ✅ IMPLEMENTED (Jun 28, 2026) — commit `95014ea`
+**Crate:** `cdk = "0.17.2-rc.2"` + `cdk-redb` (switched from cdk-sqlite due to rusqlite version conflict with vector_sdk)
 
 ---
 
-## Architecture
+## Implementation Notes
+
+### What Changed from Original Design
+
+1. **cdk-sqlite → cdk-redb**: `cdk-sqlite` uses rusqlite 0.31 which conflicts with `vector_sdk`'s rusqlite 0.37 (both link `libsqlite3-sys` natively). Switched to `cdk-redb` which uses pure-Rust `redb` embedded DB — no native lib conflicts.
+
+2. **Wallet API**: Used `Wallet::new()` direct constructor instead of `WalletRepositoryBuilder`. The CDK `Wallet` struct handles everything for a single-mint wallet.
+
+3. **`!zap` (NIP-57)**: Not implemented in this pass. The full NIP-57 flow (LNURL resolution, kind 9734 zap request signing, etc.) is complex and was deferred per task instructions ("If the full NIP-57 flow is too complex... stub it with a TODO and implement !tip properly first"). Can be added in a follow-up.
+
+### What Works
+
+- ✅ **Wallet init**: BIP39 mnemonic generation, Redb persistent storage, seed file (mode 600)
+- ✅ **`!balance`**: Shows total unspent balance across the configured mint
+- ✅ **`!tip <sats> [memo]`**: Creates Cashu V3 token via `prepare_send → confirm`
+- ✅ **`!deposit [sats]`**: Creates Lightning mint quote (BOLT11 invoice)
+- ✅ **`!withdraw <invoice>`**: Full melt flow: melt_quote → prepare_melt → confirm
+- ✅ **Graceful errors**: Insufficient funds, mint unreachable, wallet not initialized
+- ✅ **Config**: `[wallet]` section with `enabled` (default false) and `mint_url`
+- ✅ **Feature gating**: Wallet commands gated by `features.nostr`
+
+### Files Modified/Created
+
+| File | Action |
+|------|--------|
+| `src/wallet/mod.rs` | **CREATED** — CashuWallet wrapper (init, balance, send_tip, deposit, withdraw) |
+| `src/handlers/wallet_cmds.rs` | **CREATED** — !balance, !tip, !deposit, !withdraw command handlers |
+| `src/handlers/mod.rs` | Modified — Added `wallet_cmds` module |
+| `src/handlers/commands.rs` | Modified — Added wallet commands to registry and dispatch |
+| `src/bot.rs` | Modified — Added wallet init + `wallet: Option<Arc<CashuWallet>>` to BotContext |
+| `src/config.rs` | Modified — Added `WalletSection` with `enabled` and `mint_url` |
+| `src/main.rs` | Modified — Added `mod wallet;` |
+| `Cargo.toml` | Modified — Added cdk, cdk-redb, bip39 deps; version → 0.4.0 |
+| `config/bot.toml.example` | Modified — Added `[wallet]` section documentation |
+
+### To Enable
+
+Add to `config/bot.toml`:
+```toml
+[wallet]
+enabled = true
+mint_url = "https://mint.minibits.cash/Bitcoin"
+```
+
+---
+
+## Original Design (Reference)
 
 ### Wallet Module: `src/wallet/mod.rs`
 
