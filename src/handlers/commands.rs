@@ -96,6 +96,10 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             msg.reply("pong 🏓").await?;
         }
 
+        "!repo" => {
+            msg.reply("📦 concord-bots\nhttps://github.com/CentauriAgent/concord-bots\n\nClone it, build your own bot, join the fleet! 🚢").await?;
+        }
+
         "!help" => {
             msg.reply(&help_text(&ctx.config.features)).await?;
         }
@@ -536,6 +540,7 @@ struct CommandMeta {
 const COMMAND_REGISTRY: &[CommandMeta] = &[
     // Core (always enabled)
     CommandMeta { name: "!ping",     description: "Health check",                       feature: None, auth: AuthLevel::Public },
+    CommandMeta { name: "!repo",     description: "Bot repo URL",                        feature: None, auth: AuthLevel::Public },
     CommandMeta { name: "!help",     description: "Show this help",                     feature: None, auth: AuthLevel::Public },
     CommandMeta { name: "!echo",     description: "Echo text back",                     feature: None, auth: AuthLevel::Public },
     CommandMeta { name: "!whoami",   description: "Bot identity",                       feature: None, auth: AuthLevel::Public },
