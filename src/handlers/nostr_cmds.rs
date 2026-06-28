@@ -118,9 +118,10 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let mut response = format!("👤 **{}**\n", name);
 
     if !about.is_empty() {
-        // Truncate long about texts
-        let about_display = if about.len() > 200 {
-            format!("{}...", &about[..200])
+        // Truncate long about texts (avoid splitting multi-byte characters)
+        let about_display = if about.chars().count() > 200 {
+            let truncated: String = about.chars().take(200).collect();
+            format!("{}...", truncated)
         } else {
             about.to_string()
         };
