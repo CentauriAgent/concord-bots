@@ -29,9 +29,10 @@ invite_policy = "manual"
 # ]
 
 # Bot profile (optional — shown to users in Vector)
-# display_name = "My Awesome Bot"
+# display_name = "Keystone"
+# A short description shown on the bot's Nostr profile.
+# about = "A Concord Protocol bot built with concord-bots"
 # picture = "https://example.com/avatar.png"
-# about = "A helpful Vector bot built with concord-bots"
 
 # =============================================================================
 # Authorization — owner and permission system
