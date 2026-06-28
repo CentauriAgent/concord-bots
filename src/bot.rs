@@ -42,14 +42,32 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
     let mut builder = VectorBot::builder();
 
-    let nsec = config.bot_nsec();
+    // Resolve nsec: explicit config, persisted SDK file, or generate new.
+    // The SDK persists auto-generated keys to ~/.local/share/io.vectorapp/sdk/identity.nsec
+    let nsec = config.bot_nsec().or_else(|| {
+        // Try SDK's default identity location
+        if let Some(home) = std::env::var_os("HOME") {
+            let sdk_path = std::path::Path::new(&home)
+                .join(".local/share/io.vectorapp/sdk/identity.nsec");
+            if let Ok(saved) = std::fs::read_to_string(&sdk_path) {
+                let saved = saved.trim();
+                if saved.starts_with("nsec1") {
+                    tracing::info!("Using SDK-persisted nsec from {:?}", sdk_path);
+                    return Some(saved.to_string());
+                }
+            }
+        }
+        None
+    });
 
-    if let Some(ref n) = nsec {
+    let nsec = if let Some(ref n) = nsec {
         tracing::info!("Using provided nsec identity");
         builder = builder.nsec(n);
+        Some(n.clone())
     } else {
         tracing::info!("No nsec provided — bot will auto-generate and persist an identity");
-    }
+        None
+    };
 
     match config.invite_policy() {
         crate::config::InvitePolicyConfig::Public => {

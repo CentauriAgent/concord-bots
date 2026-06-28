@@ -219,15 +219,32 @@ impl BotConfig {
         }
     }
 
-    /// Resolve the nsec: config value, then env var, then None (auto-generate).
+    /// Resolve the nsec: config value, then env var, then SDK-persisted file.
     pub fn bot_nsec(&self) -> Option<String> {
-        // Config takes priority, then env var.
+        // Config takes priority.
         if let Some(ref n) = self.bot.nsec {
             if !n.is_empty() && n != "auto" {
                 return Some(n.clone());
             }
         }
-        std::env::var("NSEC").ok().filter(|s| !s.is_empty())
+        // Then env var.
+        if let Ok(v) = std::env::var("NSEC") {
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+        // Then SDK's default identity file (auto-generated on first run).
+        if let Some(home) = std::env::var_os("HOME") {
+            let sdk_path = std::path::Path::new(&home)
+                .join(".local/share/io.vectorapp/sdk/identity.nsec");
+            if let Ok(saved) = std::fs::read_to_string(&sdk_path) {
+                let saved = saved.trim();
+                if saved.starts_with("nsec1") {
+                    return Some(saved.to_string());
+                }
+            }
+        }
+        None
     }
 
     /// Parse the invite policy from config.
@@ -319,7 +336,9 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = BotConfig::default();
-        assert!(config.bot_nsec().is_none());
+        // bot_nsec() may find the SDK's persisted identity file, so only check
+        // that the config field itself is None.
+        assert!(config.bot.nsec.is_none());
         assert!(matches!(config.invite_policy(), InvitePolicyConfig::Manual));
     }
 
