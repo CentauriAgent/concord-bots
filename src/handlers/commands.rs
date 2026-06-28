@@ -140,6 +140,42 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             utility::weather_command(ctx, msg, args).await?;
         }
 
+        "!remind" => {
+            utility::remind_command(ctx, msg, args).await?;
+        }
+
+        "!poll" => {
+            utility::poll_command(ctx, msg, args).await?;
+        }
+
+        "!translate" => {
+            utility::translate_command(ctx, msg, args).await?;
+        }
+
+        "!define" => {
+            utility::define_command(ctx, msg, args).await?;
+        }
+
+        "!quote" => {
+            utility::quote_command(ctx, msg).await?;
+        }
+
+        "!joke" => {
+            utility::joke_command(ctx, msg).await?;
+        }
+
+        "!fact" => {
+            utility::fact_command(ctx, msg).await?;
+        }
+
+        "!meme" => {
+            utility::meme_command(ctx, msg).await?;
+        }
+
+        "!shorten" => {
+            utility::shorten_command(ctx, msg, args).await?;
+        }
+
         // =====================================================================
         // FUN COMMANDS (Public)
         // =====================================================================
@@ -340,6 +376,15 @@ fn help_text() -> String {
             ("!time [tz]", "Current time (e.g. !time US/Eastern)"),
             ("!roll [NdS]", "Dice — !roll, !roll 20, !roll 3d6"),
             ("!weather <zip>", "Weather for a US zipcode"),
+            ("!remind <time> <msg>", "Set a reminder (30m, 2h, 1d)"),
+            ("!poll <q> | a | b", "Create a poll"),
+            ("!translate <lang> <text>", "Translate text (e.g. !translate es Hi)"),
+            ("!define <word>", "Dictionary definition"),
+            ("!quote", "Random inspirational quote"),
+            ("!joke", "Random dad joke"),
+            ("!fact", "Random fun fact"),
+            ("!meme", "Random meme"),
+            ("!shorten <url>", "Shorten a URL"),
         ]),
         ("🎮 Fun", vec![
             ("!8ball <q>", "Magic 8-ball"),
@@ -386,6 +431,16 @@ mod tests {
         assert!(help.contains("!time"));
         assert!(help.contains("!roll"));
         assert!(help.contains("!weather"));
+        // New utility commands
+        assert!(help.contains("!remind"));
+        assert!(help.contains("!poll"));
+        assert!(help.contains("!translate"));
+        assert!(help.contains("!define"));
+        assert!(help.contains("!quote"));
+        assert!(help.contains("!joke"));
+        assert!(help.contains("!fact"));
+        assert!(help.contains("!meme"));
+        assert!(help.contains("!shorten"));
         // Fun
         assert!(help.contains("!8ball"));
         assert!(help.contains("!flip"));

@@ -368,6 +368,438 @@ fn weather_code_to_emoji(code: Option<i64>) -> String {
 }
 
 // -----------------------------------------------------------------------------
+// !remind <time> <message> — Set a reminder (echo for now, persistence later)
+// -----------------------------------------------------------------------------
+
+pub async fn remind_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let args = args.trim();
+
+    if args.is_empty() {
+        msg.reply(
+            "Usage: !remind <time> <message>\nExamples: !remind 30m Call mom, !remind 2h Check oven, !remind 1d Pay bills"
+        ).await?;
+        return Ok(());
+    }
+
+    match parse_reminder_input(args) {
+        Some((desc, message)) => {
+            if message.is_empty() {
+                msg.reply("⚠️ Please provide a message after the time.\nExample: !remind 30m Call mom").await?;
+            } else {
+                msg.reply(&format!("⏰ Reminder set: {} (in {})", message, desc)).await?;
+            }
+        }
+        None => {
+            msg.reply(
+                "⚠️ Could not parse time. Use: 30m, 2h, 1d, 30 minutes, 2 hours, 1 day\nExample: !remind 30m Call mom"
+            ).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse reminder input like "30m Call mom" or "2 hours Check oven".
+/// Returns (human-readable duration description, message text).
+fn parse_reminder_input(input: &str) -> Option<(String, String)> {
+    let input = input.trim();
+
+    // Parse leading number
+    let num_end = input
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(input.len());
+    if num_end == 0 {
+        return None;
+    }
+    let num: u64 = input[..num_end].parse().ok()?;
+    let mut remaining = &input[num_end..];
+
+    // Skip optional space between number and unit
+    remaining = remaining.trim_start();
+
+    // Parse unit (alphabetic chars)
+    let unit_end = remaining
+        .find(|c: char| !c.is_alphabetic())
+        .unwrap_or(remaining.len());
+    if unit_end == 0 {
+        return None;
+    }
+    let unit = remaining[..unit_end].to_lowercase();
+    remaining = &remaining[unit_end..];
+
+    let desc = match unit.as_str() {
+        "m" | "min" | "mins" | "minute" | "minutes" => {
+            format!("{} minute{}", num, if num == 1 { "" } else { "s" })
+        }
+        "h" | "hr" | "hrs" | "hour" | "hours" => {
+            format!("{} hour{}", num, if num == 1 { "" } else { "s" })
+        }
+        "d" | "day" | "days" => {
+            format!("{} day{}", num, if num == 1 { "" } else { "s" })
+        }
+        _ => return None,
+    };
+
+    let message = remaining.trim().to_string();
+    Some((desc, message))
+}
+
+// -----------------------------------------------------------------------------
+// !poll <question> | option1 | option2 | ... — Create a poll
+// -----------------------------------------------------------------------------
+
+pub async fn poll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let args = args.trim();
+
+    if args.is_empty() {
+        msg.reply("Usage: !poll <question> | option1 | option2 | ...\nExample: !poll Pizza? | Yes | No | Maybe").await?;
+        return Ok(());
+    }
+
+    let parts: Vec<&str> = args
+        .split('|')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if parts.len() < 3 {
+        msg.reply("⚠️ Need a question and at least 2 options.\nExample: !poll Pizza? | Yes | No").await?;
+        return Ok(());
+    }
+
+    let question = parts[0];
+    let options = &parts[1..];
+
+    let mut response = format!("📊 **{}**\n", question);
+    for (i, opt) in options.iter().enumerate() {
+        response.push_str(&format!("  {}️ {}\n", number_emoji(i + 1), opt));
+    }
+    response.push_str("\nReact to vote!");
+
+    msg.reply(response.trim()).await?;
+    Ok(())
+}
+
+/// Convert a number 1-10 to its emoji representation.
+fn number_emoji(n: usize) -> &'static str {
+    match n {
+        1 => "1⃣",
+        2 => "2⃣",
+        3 => "3⃣",
+        4 => "4⃣",
+        5 => "5⃣",
+        6 => "6⃣",
+        7 => "7⃣",
+        8 => "8⃣",
+        9 => "9⃣",
+        10 => "🔟",
+        _ => "❓",
+    }
+}
+
+// -----------------------------------------------------------------------------
+// !translate <language> <text> — Translate text via MyMemory API
+// -----------------------------------------------------------------------------
+
+pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let args = args.trim();
+
+    if args.is_empty() {
+        msg.reply("Usage: !translate <language> <text>\nExample: !translate es Hello world").await?;
+        return Ok(());
+    }
+
+    // Split: first word is language code, rest is text
+    let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
+    if parts.len() < 2 {
+        msg.reply("⚠️ Provide a language code and text.\nExample: !translate es Hello world").await?;
+        return Ok(());
+    }
+
+    let lang = parts[0].trim();
+    let text = parts[1].trim();
+
+    if text.is_empty() {
+        msg.reply("⚠️ Provide text to translate.\nExample: !translate es Hello world").await?;
+        return Ok(());
+    }
+
+    let url = format!(
+        "https://api.mymemory.translated.net/get?q={}&langpair=en|{}",
+        url_encode(text),
+        url_encode(lang)
+    );
+
+    let data = match http::fetch_json(&url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Translate API failed: {}", e);
+            msg.reply("⚠️ Could not translate text right now.").await?;
+            return Ok(());
+        }
+    };
+
+    let translated = data["responseData"]["translatedText"]
+        .as_str()
+        .unwrap_or("Could not parse translation.");
+
+    msg.reply(&format!("🌍 ({} → {}): {}", "EN", lang.to_uppercase(), translated)).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !define <word> — Dictionary definition via Free Dictionary API
+// -----------------------------------------------------------------------------
+
+pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let word = args.trim();
+
+    if word.is_empty() {
+        msg.reply("Usage: !define <word>\nExample: !define serendipity").await?;
+        return Ok(());
+    }
+
+    let url = format!(
+        "https://api.dictionaryapi.dev/api/v2/entries/en/{}",
+        url_encode(word)
+    );
+
+    let data = match http::fetch_json(&url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Dictionary API failed: {}", e);
+            msg.reply(&format!("⚠️ No definition found for \"{}\".", word)).await?;
+            return Ok(());
+        }
+    };
+
+    // Response is an array of entries — take the first
+    let entries = match data.as_array() {
+        Some(arr) if !arr.is_empty() => &arr[0],
+        _ => {
+            msg.reply(&format!("⚠️ No definition found for \"{}\".", word)).await?;
+            return Ok(());
+        }
+    };
+
+    let phonetic = entries["phonetic"].as_str().unwrap_or("");
+    let meanings = entries["meanings"].as_array();
+
+    let mut response = format!("📖 **{}**", word);
+    if !phonetic.is_empty() {
+        response.push_str(&format!(" {}", phonetic));
+    }
+    response.push('\n');
+
+    let mut shown = 0;
+    if let Some(meanings) = meanings {
+        for meaning in meanings {
+            if shown >= 3 {
+                break;
+            }
+            let pos = meaning["partOfSpeech"].as_str().unwrap_or("?");
+            if let Some(defs) = meaning["definitions"].as_array() {
+                for def in defs {
+                    if shown >= 3 {
+                        break;
+                    }
+                    if let Some(definition) = def["definition"].as_str() {
+                        response.push_str(&format!("  *({})* {}\n", pos, definition));
+                        shown += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if shown == 0 {
+        response.push_str("  No definitions available.");
+    }
+
+    msg.reply(response.trim()).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !quote — Random inspirational quote via Quotable API
+// -----------------------------------------------------------------------------
+
+pub async fn quote_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let url = "https://api.quotable.io/random";
+
+    let data = match http::fetch_json(url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Quote API failed: {}", e);
+            msg.reply("⚠️ Could not fetch a quote right now.").await?;
+            return Ok(());
+        }
+    };
+
+    let content = data["content"].as_str().unwrap_or("...");
+    let author = data["author"].as_str().unwrap_or("Unknown");
+
+    msg.reply(&format!("💬 \"{}\" — {}", content, author)).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !joke — Random dad joke via icanhazdadjoke.com
+// -----------------------------------------------------------------------------
+
+pub async fn joke_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    // icanhazdadjoke.com requires Accept: application/json header.
+    // The shared HTTP client in lib/http.rs doesn't set this, so we make
+    // a one-off request with the correct header.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent(format!("concord-bots/{}", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
+    let resp = client
+        .get("https://icanhazdadjoke.com/")
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            match r.json::<serde_json::Value>().await {
+                Ok(data) => {
+                    let joke = data["joke"].as_str().unwrap_or("Could not parse joke.");
+                    msg.reply(&format!("😄 {}", joke)).await?;
+                }
+                Err(_) => {
+                    msg.reply("⚠️ Could not parse joke response.").await?;
+                }
+            }
+        }
+        _ => {
+            msg.reply("⚠️ Could not fetch a joke right now.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !fact — Random fun fact via Useless Facts API
+// -----------------------------------------------------------------------------
+
+pub async fn fact_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let url = "https://uselessfacts.jsph.pl/api/v2/facts/random?language=en";
+
+    let data = match http::fetch_json(url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Facts API failed: {}", e);
+            msg.reply("⚠️ Could not fetch a fact right now.").await?;
+            return Ok(());
+        }
+    };
+
+    let fact = data["text"].as_str().unwrap_or("Could not parse fact.");
+
+    msg.reply(&format!("🧠 {}", fact)).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !meme — Random meme via meme-api.com
+// -----------------------------------------------------------------------------
+
+pub async fn meme_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let url = "https://meme-api.com/gimme";
+
+    let data = match http::fetch_json(url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Meme API failed: {}", e);
+            msg.reply("⚠️ Could not fetch a meme right now.").await?;
+            return Ok(());
+        }
+    };
+
+    let title = data["title"].as_str().unwrap_or("A meme");
+    let meme_url = data["url"].as_str().unwrap_or("");
+    let subreddit = data["subreddit"].as_str().unwrap_or("");
+
+    let mut response = format!("🤣 **{}**", title);
+    if !subreddit.is_empty() {
+        response.push_str(&format!(" (r/{})", subreddit));
+    }
+    if !meme_url.is_empty() {
+        response.push_str(&format!("\n{}", meme_url));
+    }
+
+    msg.reply(&response).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !shorten <url> — URL shortener via is.gd
+// -----------------------------------------------------------------------------
+
+pub async fn shorten_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let url = args.trim();
+
+    if url.is_empty() {
+        msg.reply("Usage: !shorten <url>\nExample: !shorten https://example.com/very/long/url").await?;
+        return Ok(());
+    }
+
+    // Basic URL validation
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        msg.reply("⚠️ URL must start with http:// or https://").await?;
+        return Ok(());
+    }
+
+    let api_url = format!(
+        "https://is.gd/create.php?format=json&url={}",
+        url_encode(url)
+    );
+
+    let data = match http::fetch_json(&api_url).await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("is.gd API failed: {}", e);
+            msg.reply("⚠️ Could not shorten URL right now.").await?;
+            return Ok(());
+        }
+    };
+
+    // Check for error response
+    if let Some(err_msg) = data["errormessage"].as_str() {
+        msg.reply(&format!("⚠️ {}", err_msg)).await?;
+        return Ok(());
+    }
+
+    let short = data["shorturl"].as_str().unwrap_or("Could not parse response.");
+
+    msg.reply(&format!("🔗 {}", short)).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// URL encoding helper (avoids adding a new dependency)
+// -----------------------------------------------------------------------------
+
+fn url_encode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(b as char);
+            }
+            _ => {
+                result.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    result
+}
+
+// -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
@@ -400,5 +832,47 @@ mod tests {
         assert_eq!(weather_code_to_emoji(Some(3)), "☁️ Overcast");
         assert_eq!(weather_code_to_emoji(Some(95)), "⛈️ Thunderstorm");
         assert_eq!(weather_code_to_emoji(None), "❓ Unknown");
+    }
+
+    #[test]
+    fn test_parse_reminder_input() {
+        // Short format
+        let (desc, msg) = parse_reminder_input("30m Call mom").unwrap();
+        assert_eq!(desc, "30 minutes");
+        assert_eq!(msg, "Call mom");
+
+        // Long format
+        let (desc, msg) = parse_reminder_input("2 hours Check the oven").unwrap();
+        assert_eq!(desc, "2 hours");
+        assert_eq!(msg, "Check the oven");
+
+        // Day format
+        let (desc, msg) = parse_reminder_input("1d Pay bills").unwrap();
+        assert_eq!(desc, "1 day");
+        assert_eq!(msg, "Pay bills");
+
+        // Singular
+        let (desc, _) = parse_reminder_input("1 minute Test").unwrap();
+        assert_eq!(desc, "1 minute");
+
+        // Invalid
+        assert!(parse_reminder_input("notime here").is_none());
+        assert!(parse_reminder_input("").is_none());
+    }
+
+    #[test]
+    fn test_number_emoji() {
+        assert_eq!(number_emoji(1), "1⃣");
+        assert_eq!(number_emoji(5), "5⃣");
+        assert_eq!(number_emoji(10), "🔟");
+        assert_eq!(number_emoji(99), "❓");
+    }
+
+    #[test]
+    fn test_url_encode() {
+        assert_eq!(url_encode("hello"), "hello");
+        assert_eq!(url_encode("hello world"), "hello%20world");
+        assert_eq!(url_encode("https://example.com/path?q=1&a=b"), "https%3A%2F%2Fexample.com%2Fpath%3Fq%3D1%26a%3Db");
+        assert_eq!(url_encode("a-b_c.d~e"), "a-b_c.d~e");
     }
 }
