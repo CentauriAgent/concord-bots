@@ -188,6 +188,15 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             dispatch_wallet(ctx, msg, command, args).await?;
         }
 
+        "!zap"
+            if features.nostr => {
+            // Authorized+: community members can zap, lurkers can't drain
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            dispatch_wallet(ctx, msg, command, args).await?;
+        }
+
         "!deposit"
             if features.nostr => {
             // Public: anyone can fund the bot
@@ -286,6 +295,7 @@ async fn dispatch_wallet(
     match command {
         "!balance" => wallet_cmds::balance_command(ctx, msg).await?,
         "!tip" => wallet_cmds::tip_command(ctx, msg, args).await?,
+        "!zap" => wallet_cmds::zap_command(ctx, msg, args).await?,
         "!deposit" => wallet_cmds::deposit_command(ctx, msg, args).await?,
         "!withdraw" => wallet_cmds::withdraw_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_wallet called with non-wallet command: {}", command),
@@ -478,6 +488,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     // Wallet (gated by Nostr feature)
     CommandMeta { name: "!balance",  description: "Show Cashu wallet balance",         feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
     CommandMeta { name: "!tip",      description: "Tip sats as Cashu token",           feature: Some(Feature::Nostr), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!zap",      description: "Zap sats via NIP-57",                   feature: Some(Feature::Nostr), auth: AuthLevel::Authorized },
     CommandMeta { name: "!deposit",  description: "Generate Lightning deposit invoice", feature: Some(Feature::Nostr), auth: AuthLevel::Public },
     CommandMeta { name: "!withdraw", description: "Pay Lightning invoice from wallet", feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
 
@@ -574,6 +585,7 @@ mod tests {
         assert!(help.contains("!tip"));
         assert!(help.contains("!deposit"));
         assert!(help.contains("!withdraw"));
+        assert!(help.contains("!zap"));
         // Owner
         assert!(help.contains("!add"));
         assert!(help.contains("!remove"));

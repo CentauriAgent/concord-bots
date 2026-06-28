@@ -31,6 +31,9 @@ cdk = { version = "0.17.2-rc.2", default-features = false, features = ["wallet",
 cdk-redb = { version = "0.17.2-rc.2", default-features = false, features = ["wallet"] }
 bip39 = "2"
 
+# URL encoding for NIP-57 zap requests
+urlencoding = "2"
+
 # Vendor OpenSSL to avoid system dependency during build
 openssl = { version = "0.10", features = ["vendored"] }
 
