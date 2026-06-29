@@ -12,7 +12,9 @@ use std::sync::Arc;
 use vector_sdk::{BotEvent, VectorBot};
 
 use crate::auth::AuthManager;
+use crate::community::Database;
 use crate::config::BotConfig;
+use crate::git_monitor::store::SubscriptionStore;
 use crate::handlers;
 use crate::rate_limiter::RateLimiter;
 use crate::wallet::CashuWallet;
@@ -30,6 +32,10 @@ pub struct BotContext {
     pub rate_limiter: RateLimiter,
     /// Cashu wallet (None if not configured).
     pub wallet: Option<Arc<CashuWallet>>,
+    /// Community engagement database (XP, levels, giveaways, reputation).
+    pub community_db: Database,
+    /// Git repo monitor subscription store.
+    pub git_store: Option<SubscriptionStore>,
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -148,6 +154,48 @@ pub async fn run(config: BotConfig) -> Result<()> {
     };
 
     // -------------------------------------------------------------------------
+    // Step 2c: Initialize community engagement database
+    // -------------------------------------------------------------------------
+
+    let community_db_path = std::path::PathBuf::from(
+        std::env::var("COMMUNITY_DB_PATH").unwrap_or_else(|_| "./data/community.sqlite".to_string())
+    );
+    let community_db = match Database::open(&community_db_path) {
+        Ok(db) => {
+            tracing::info!("Community database initialized at {}", community_db_path.display());
+            db
+        }
+        Err(e) => {
+            tracing::error!("Failed to init community database: {}", e);
+            return Err(e);
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // Step 2d: Initialize git monitor store (optional, feature-gated)
+    // -------------------------------------------------------------------------
+
+    let git_store = if config.features.git_monitor && config.git_monitor.enabled {
+        let git_db_path = std::path::PathBuf::from(
+            std::env::var("GIT_MONITOR_DB_PATH")
+                .unwrap_or_else(|_| "./data/repos.sqlite".to_string()),
+        );
+        match SubscriptionStore::open(&git_db_path) {
+            Ok(s) => {
+                tracing::info!("Git monitor store initialized at {}", git_db_path.display());
+                Some(s)
+            }
+            Err(e) => {
+                tracing::error!("Failed to init git monitor store: {}", e);
+                None
+            }
+        }
+    } else {
+        tracing::info!("Git monitor disabled (feature flag or config)");
+        None
+    };
+
+    // -------------------------------------------------------------------------
     // Step 3: Create shared context
     // -------------------------------------------------------------------------
 
@@ -157,6 +205,8 @@ pub async fn run(config: BotConfig) -> Result<()> {
         auth,
         rate_limiter: RateLimiter::default(),
         wallet,
+        community_db,
+        git_store,
     };
 
     // -------------------------------------------------------------------------

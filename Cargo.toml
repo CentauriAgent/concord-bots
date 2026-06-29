@@ -1,6 +1,6 @@
 [package]
 name = "concord-bots"
-version = "0.4.0"
+version = "1.1.0"
 edition = "2021"
 license = "MIT"
 description = "A generic Vector/Concord Protocol bot template for AI agents"
@@ -33,6 +33,9 @@ bip39 = "2"
 
 # URL encoding for NIP-57 zap requests
 urlencoding = "2"
+
+# SQLite for community engagement system (XP, levels, giveaways, reputation)
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Vendor OpenSSL to avoid system dependency during build
 openssl = { version = "0.10", features = ["vendored"] }

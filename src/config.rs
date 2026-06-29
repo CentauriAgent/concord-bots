@@ -25,6 +25,12 @@ pub struct BotConfig {
     /// Cashu wallet configuration.
     #[serde(default)]
     pub wallet: WalletSection,
+    /// Community engagement settings.
+    #[serde(default)]
+    pub community_settings: CommunitySettingsSection,
+    /// Git repo monitor configuration.
+    #[serde(default)]
+    pub git_monitor: GitMonitorSection,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -43,6 +49,7 @@ pub enum Feature {
     Nostr,
     Ai,
     Moderation,
+    GitMonitor,
 }
 
 /// Feature flags for command groups. All default to `true` except `ai`.
@@ -60,6 +67,8 @@ pub struct FeaturesSection {
     pub ai: bool,
     #[serde(default = "default_true")]
     pub moderation: bool,
+    #[serde(default = "default_true")]
+    pub git_monitor: bool,
 }
 
 impl Default for FeaturesSection {
@@ -71,6 +80,7 @@ impl Default for FeaturesSection {
             nostr: true,
             ai: false,
             moderation: true,
+            git_monitor: true,
         }
     }
 }
@@ -85,6 +95,7 @@ impl FeaturesSection {
             Feature::Nostr => self.nostr,
             Feature::Ai => self.ai,
             Feature::Moderation => self.moderation,
+            Feature::GitMonitor => self.git_monitor,
         }
     }
 }
@@ -275,14 +286,24 @@ impl BotConfig {
         }
         tracing::info!("  features:");
         tracing::info!(
-            "    utility: {}, fun: {}, community: {}, nostr: {}, ai: {}, moderation: {}",
+            "    utility: {}, fun: {}, community: {}, nostr: {}, ai: {}, moderation: {}, git_monitor: {}",
             self.features.utility,
             self.features.fun,
             self.features.community,
             self.features.nostr,
             self.features.ai,
-            self.features.moderation
+            self.features.moderation,
+            self.features.git_monitor
         );
+        if self.git_monitor.enabled {
+            tracing::info!(
+                "  git_monitor: poll={}s, max_repos={}, github_token={}, gitlab_token={}",
+                self.git_monitor.poll_interval_secs,
+                self.git_monitor.max_repos_per_channel,
+                if self.git_monitor.github_token.is_empty() { "none" } else { "set" },
+                if self.git_monitor.gitlab_token.is_empty() { "none" } else { "set" },
+            );
+        }
     }
 
     /// Access a custom config value by path (e.g., "api_keys.github_token").
@@ -327,6 +348,101 @@ impl Default for WalletSection {
 
 fn default_mint_url() -> String {
     "https://mint.minibits.cash/Bitcoin".to_string()
+}
+
+// -----------------------------------------------------------------------------
+// Community settings section
+// -----------------------------------------------------------------------------
+
+/// Community engagement configuration (XP, giveaways, reputation).
+/// All features default to enabled.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CommunitySettingsSection {
+    /// Enable XP gain from messages (default: true).
+    #[serde(default = "default_true")]
+    pub xp_enabled: bool,
+    /// Enable giveaways (default: true).
+    #[serde(default = "default_true")]
+    pub giveaways_enabled: bool,
+    /// Enable reputation system (default: true).
+    #[serde(default = "default_true")]
+    pub reputation_enabled: bool,
+}
+
+// -----------------------------------------------------------------------------
+// Git Monitor section
+// -----------------------------------------------------------------------------
+
+/// Git repo monitor configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitMonitorSection {
+    /// Master switch (default: true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Poll interval in seconds (default: 300 = 5 min).
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_secs: u64,
+    /// Optional GitHub PAT for higher rate limits.
+    #[serde(default)]
+    pub github_token: String,
+    /// Optional GitLab token.
+    #[serde(default)]
+    pub gitlab_token: String,
+    /// GitLab base URL (for self-hosted instances).
+    #[serde(default = "default_gitlab_host")]
+    pub gitlab_host: String,
+    /// Default branch if not auto-detected.
+    #[serde(default = "default_branch_main")]
+    pub default_branch: String,
+    /// Post commit announcements.
+    #[serde(default = "default_true")]
+    pub post_commits: bool,
+    /// Post release announcements.
+    #[serde(default = "default_true")]
+    pub post_releases: bool,
+    /// Spam guard: max repos per channel.
+    #[serde(default = "default_max_repos")]
+    pub max_repos_per_channel: usize,
+    /// Delay between API calls in a poll cycle (ms).
+    #[serde(default = "default_polite_sleep_ms")]
+    pub polite_sleep_ms: u64,
+}
+
+impl Default for GitMonitorSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_secs: 300,
+            github_token: String::new(),
+            gitlab_token: String::new(),
+            gitlab_host: default_gitlab_host(),
+            default_branch: default_branch_main(),
+            post_commits: true,
+            post_releases: true,
+            max_repos_per_channel: 10,
+            polite_sleep_ms: 500,
+        }
+    }
+}
+
+fn default_poll_interval() -> u64 {
+    300
+}
+
+fn default_gitlab_host() -> String {
+    "https://gitlab.com".to_string()
+}
+
+fn default_branch_main() -> String {
+    "main".to_string()
+}
+
+fn default_max_repos() -> usize {
+    10
+}
+
+fn default_polite_sleep_ms() -> u64 {
+    500
 }
 
 #[cfg(test)]
@@ -384,6 +500,7 @@ join = ["abc123"]
         assert!(config.features.nostr);
         assert!(!config.features.ai); // disabled by default
         assert!(config.features.moderation);
+        assert!(config.features.git_monitor); // enabled by default
     }
 
     #[test]
@@ -392,6 +509,19 @@ join = ["abc123"]
         assert!(config.features.is_enabled(Feature::Utility));
         assert!(config.features.is_enabled(Feature::Fun));
         assert!(!config.features.is_enabled(Feature::Ai));
+        assert!(config.features.is_enabled(Feature::GitMonitor));
+    }
+
+    #[test]
+    fn test_git_monitor_defaults() {
+        let config = BotConfig::default();
+        assert!(config.git_monitor.enabled);
+        assert_eq!(config.git_monitor.poll_interval_secs, 300);
+        assert_eq!(config.git_monitor.max_repos_per_channel, 10);
+        assert_eq!(config.git_monitor.default_branch, "main");
+        assert_eq!(config.git_monitor.gitlab_host, "https://gitlab.com");
+        assert!(config.git_monitor.post_commits);
+        assert!(config.git_monitor.post_releases);
     }
 
     #[test]

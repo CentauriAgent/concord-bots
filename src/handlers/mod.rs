@@ -52,7 +52,9 @@ pub fn is_welcome_enabled() -> bool {
 }
 
 pub mod commands;
+pub mod community_cmds;
 pub mod fun;
+pub mod git_cmds;
 pub mod scheduled;
 pub mod utility;
 pub mod wallet_cmds;
@@ -87,6 +89,20 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
     let text = msg.text();
 
     // -------------------------------------------------------------------------
+    // 0. XP tracking — award XP for non-command messages (before dispatch)
+    // --------------------------------------------------------------------------
+    if !text.starts_with('!') {
+        if let Some(ref npub) = msg.message.npub {
+            if !npub.is_empty() && npub != &ctx.bot.npub() {
+                // Only award XP if community features are enabled
+                if ctx.config.features.is_enabled(crate::config::Feature::Community) {
+                    award_message_xp(ctx, npub, &msg.chat_id).await;
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // 1. Command dispatch — messages starting with "!"
     // -------------------------------------------------------------------------
     if text.starts_with('!') {
@@ -116,6 +132,50 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
     // }
 
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// XP awarding for non-command messages
+// -----------------------------------------------------------------------------
+
+/// Award XP for a non-command message. Enforces 60-second cooldown and
+/// announces level-ups. 15-25 random XP per message.
+async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str) {
+    // Check 60-second cooldown
+    match ctx.community_db.is_on_xp_cooldown(npub, 60) {
+        Ok(true) => return, // still on cooldown
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!("XP cooldown check failed: {}", e);
+            return;
+        }
+    }
+
+    // Increment message count
+    if let Err(e) = ctx.community_db.increment_messages(npub) {
+        tracing::warn!("Message count increment failed: {}", e);
+    }
+
+    // Award 15-25 random XP (compute before any .await)
+    let xp = {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        rng.gen_range(15..=25)
+    };
+
+    let leveled_up_info = ctx.community_db.award_xp(npub, xp, channel_id)
+        .ok()
+        .filter(|(_, leveled_up)| *leveled_up);
+
+    if let Some((new_level, true)) = leveled_up_info {
+        let short = if npub.len() > 16 {
+            format!("{}...{}", &npub[..12], &npub[npub.len() - 4..])
+        } else {
+            npub.to_string()
+        };
+        let announcement = format!("🎉 {} reached Level {}!", short, new_level);
+        let _ = ctx.bot.channel(channel_id.to_string()).send(&announcement).await;
+    }
 }
 
 /// Called for non-message events (member joins, reactions, typing, etc.).

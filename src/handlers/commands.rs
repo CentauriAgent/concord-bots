@@ -10,6 +10,10 @@
 //
 
 use anyhow::Result;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use vector_sdk::{BotEvent, IncomingMessage};
 
 use crate::auth::AuthLevel;
@@ -20,7 +24,16 @@ use crate::handlers::utility;
 use crate::handlers::wallet_cmds;
 use crate::handlers::nostr_cmds;
 use crate::handlers::moderation_cmds;
+use crate::handlers::community_cmds;
+use crate::handlers::git_cmds;
 use crate::rate_limiter::RateLimitResult;
+
+/// Track last !help per channel to prevent spam. Maps channel_id -> last help time.
+static HELP_COOLDOWN: Lazy<Mutex<HashMap<String, Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Cooldown for !help per channel (3 minutes).
+const HELP_COOLDOWN_DURATION: Duration = Duration::from_secs(180);
 
 // -----------------------------------------------------------------------------
 // Auth helpers
@@ -101,7 +114,27 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         "!help" => {
-            msg.reply(&help_text(&ctx.config.features)).await?;
+            // Cooldown: only show help once per channel per 3 minutes
+            let channel_id = msg.chat_id.clone();
+            let should_show = {
+                let mut map = HELP_COOLDOWN.lock().unwrap();
+                if let Some(last) = map.get(&channel_id) {
+                    if last.elapsed() < HELP_COOLDOWN_DURATION {
+                        false
+                    } else {
+                        map.insert(channel_id.clone(), Instant::now());
+                        true
+                    }
+                } else {
+                    map.insert(channel_id.clone(), Instant::now());
+                    true
+                }
+            };
+            if should_show {
+                msg.reply(&help_text(&ctx.config.features)).await?;
+            } else {
+                msg.reply("ℹ️ Help was recently shown in this channel. Try again in a few minutes.").await?;
+            }
         }
 
         "!echo" => {
@@ -285,6 +318,71 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         // =====================================================================
+        // COMMUNITY (gated by features.community)
+        // =====================================================================
+
+        "!level" | "!rank"
+            if features.community => {
+            dispatch_community(ctx, msg, command, args).await?;
+        }
+
+        "!leaderboard"
+            if features.community => {
+            dispatch_community(ctx, msg, command, args).await?;
+        }
+
+        "!profile"
+            if features.community => {
+            dispatch_community(ctx, msg, command, args).await?;
+        }
+
+        "!giveaway"
+            if features.community => {
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            dispatch_community(ctx, msg, command, args).await?;
+        }
+
+        "!rep"
+            if features.community => {
+            dispatch_community(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
+        // GIT MONITOR (gated by features.git_monitor)
+        // =====================================================================
+
+        "!git"
+            if features.git_monitor => {
+            // Subcommands have their own auth:
+            //   add/remove: Authorized+
+            //   list: Public
+            //   poll: Owner
+            // Parse subcommand to check auth
+            let sub = text.splitn(3, ' ').nth(1).unwrap_or("");
+            let needs_auth = match sub {
+                "add" | "remove" | "rm" | "delete" => {
+                    if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                        return Ok(());
+                    }
+                    true
+                }
+                "poll" => {
+                    if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                        return Ok(());
+                    }
+                    true
+                }
+                _ => false,
+            };
+            let _ = needs_auth;
+            // Extract args after "!git "
+            let git_args = text.strip_prefix("!git ").unwrap_or("");
+            git_cmds::git_command(ctx, msg, git_args).await?;
+        }
+
+        // =====================================================================
         // UNKNOWN COMMAND — silently ignore
         // =====================================================================
 
@@ -400,6 +498,24 @@ async fn dispatch_moderation(
         "!grantmod" => moderation_cmds::grantmod_command(ctx, msg, args).await?,
         "!revokemod" => moderation_cmds::revokemod_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_moderation called with non-moderation command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch community engagement commands.
+async fn dispatch_community(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!level" | "!rank" => community_cmds::level_command(ctx, msg, args).await?,
+        "!leaderboard" => community_cmds::leaderboard_command(ctx, msg).await?,
+        "!profile" => community_cmds::profile_command(ctx, msg, args).await?,
+        "!giveaway" => community_cmds::giveaway_command(ctx, msg, args).await?,
+        "!rep" => community_cmds::rep_command(ctx, msg, args).await?,
+        _ => unreachable!("dispatch_community called with non-community command: {}", command),
     }
     Ok(())
 }
@@ -593,6 +709,17 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!welcome", description: "Toggle welcome messages on/off",       feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+
+    // Community Engagement
+    CommandMeta { name: "!level",     description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!rank",      description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!leaderboard", description: "Top 10 users by XP",                 feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!profile",   description: "Show user profile card",               feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!giveaway",  description: "Start a giveaway (Authorized+)",      feature: Some(Feature::Community), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!rep",       description: "Give reputation (+1)",                 feature: Some(Feature::Community), auth: AuthLevel::Public },
+
+    // Git Monitor
+    CommandMeta { name: "!git",      description: "Git repo monitor (add/list/remove/poll)",   feature: Some(Feature::GitMonitor), auth: AuthLevel::Public },
 ];
 
 // =============================================================================
@@ -622,6 +749,9 @@ fn help_text(features: &FeaturesSection) -> String {
             .collect()),
         ("🛡️ Moderation", COMMAND_REGISTRY.iter()
             .filter(|c| c.feature == Some(Feature::Moderation) && features.is_enabled(Feature::Moderation))
+            .collect()),
+        ("📦 Git Monitor", COMMAND_REGISTRY.iter()
+            .filter(|c| c.feature == Some(Feature::GitMonitor) && features.is_enabled(Feature::GitMonitor))
             .collect()),
         ("🔐 Owner", COMMAND_REGISTRY.iter()
             .filter(|c| c.feature.is_none() && c.auth == AuthLevel::Owner)

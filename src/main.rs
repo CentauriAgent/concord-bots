@@ -11,7 +11,9 @@ use anyhow::Result;
 
 mod auth;
 mod bot;
+mod community;
 mod config;
+mod git_monitor;
 mod handlers;
 mod lib;
 mod rate_limiter;

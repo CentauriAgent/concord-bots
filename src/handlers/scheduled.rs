@@ -48,6 +48,13 @@ pub async fn register(_bot: &VectorBot, _ctx: BotContext) -> Result<()> {
     // ADD YOUR SCHEDULED TASKS HERE
     // =====================================================================
 
+    // Git Monitor Poller
+    if _ctx.config.features.git_monitor && _ctx.config.git_monitor.enabled {
+        let interval_secs = _ctx.config.git_monitor.poll_interval_secs.max(60);
+        spawn_interval_simple(_ctx.clone(), interval_secs, git_monitor_poll_task);
+        tracing::info!("Started git monitor poller (every {}s)", interval_secs);
+    }
+
     // Example: Post "I'm alive!" every 5 minutes
     // Uncomment the lines below to enable:
     //
@@ -129,6 +136,11 @@ where
 //         let _ = channel.send(&format!("₿ Bitcoin: {}", price)).await;
 //     }
 // }
+
+/// Git monitor poll task — polls all subscriptions for new commits/releases.
+async fn git_monitor_poll_task(ctx: BotContext) {
+    crate::git_monitor::poll_all(&ctx).await;
+}
 
 #[cfg(test)]
 mod tests {

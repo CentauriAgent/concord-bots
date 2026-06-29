@@ -91,6 +91,10 @@ concord-bots/
 | `!add <npub>` | Owner | Adds a user to the authorized list |
 | `!remove <npub>` | Owner | Removes a user from the authorized list |
 | `!list` | Owner | Lists all authorized users |
+| `!git add <url\|owner/repo>` | Authorized+ | Subscribe channel to a git repo |
+| `!git list` | Public | List this channel's repo subscriptions |
+| `!git remove <repo\|id>` | Authorized+ | Unsubscribe from a repo |
+| `!git poll` | Owner | Force-poll all subscriptions in this channel |
 
 ## Authorization System
 
