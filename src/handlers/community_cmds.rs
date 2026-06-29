@@ -513,12 +513,31 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
                 .get_user(&target_npub)
                 .map(|s| s.rep)
                 .unwrap_or(1);
-            msg.reply(&format!(
+
+            // Award 50 XP to the recipient for receiving rep.
+            let xp_amount = 50;
+            let (new_level, leveled_up) = match ctx
+                .community_db
+                .award_xp(&target_npub, xp_amount, &msg.chat_id)
+            {
+                Ok((lvl, lu)) => (lvl, lu),
+                Err(e) => {
+                    tracing::warn!("Failed to award rep XP: {}", e);
+                    (0, false)
+                }
+            };
+
+            let mut reply = format!(
                 "⭐ You gave +1 rep to {}! (Total: {})",
                 short_npub(&target_npub),
                 total_rep
-            ))
-            .await?;
+            );
+
+            if leveled_up {
+                reply.push_str(&format!("\n🎉 {} reached Level {}!", short_npub(&target_npub), new_level));
+            }
+
+            msg.reply(&reply).await?;
         }
         Ok(false) => {
             msg.reply(
