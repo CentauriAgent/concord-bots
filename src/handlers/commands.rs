@@ -80,6 +80,28 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let args = parts.get(1).copied().unwrap_or("");
 
     // -------------------------------------------------------------------------
+    // Channel enable/disable check — always allow !enable/!disable through,
+    // even when the channel is disabled. Everything else is gated.
+    // -------------------------------------------------------------------------
+    if command != "!enable" && command != "!disable" {
+        match ctx.community_db.is_channel_enabled(&msg.chat_id) {
+            Ok(true) => {} // channel enabled, proceed
+            Ok(false) => {
+                tracing::debug!(
+                    "Ignoring command {} in disabled channel {}",
+                    command,
+                    msg.chat_id
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to check channel state: {}", e);
+                // Fail open — allow the command through if we can't check state
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Spam protection — check rate limit before any command.
     // -------------------------------------------------------------------------
     // Use the sender's npub (or chat_id as fallback for DMs without npub).
@@ -202,6 +224,20 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
                 return Ok(());
             }
             list_command(ctx, msg).await?;
+        }
+
+        "!enable" => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            enable_command(ctx, msg).await?;
+        }
+
+        "!disable" => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            disable_command(ctx, msg).await?;
         }
 
         // =====================================================================
@@ -640,6 +676,60 @@ async fn list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     Ok(())
 }
 
+// -----------------------------------------------------------------------------
+// Channel enable/disable
+// -----------------------------------------------------------------------------
+
+async fn enable_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let channel_id = &msg.chat_id;
+    let npub = sender_npub(msg);
+
+    match ctx.community_db.is_channel_enabled(channel_id) {
+        Ok(true) => {
+            msg.reply("✅ This channel is already enabled.").await?;
+        }
+        Ok(false) => {
+            if let Err(e) = ctx.community_db.set_channel_enabled(channel_id, true, &npub) {
+                tracing::error!("Failed to enable channel: {}", e);
+                msg.reply("⚠️ Failed to enable channel.").await?;
+                return Ok(());
+            }
+            msg.reply("✅ Bot enabled for this channel. I'm listening!").await?;
+            tracing::info!("Channel {} enabled by {}", channel_id, npub);
+        }
+        Err(e) => {
+            tracing::error!("Channel state check failed: {}", e);
+            msg.reply("⚠️ Could not check channel state.").await?;
+        }
+    }
+    Ok(())
+}
+
+async fn disable_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let channel_id = &msg.chat_id;
+    let npub = sender_npub(msg);
+
+    match ctx.community_db.is_channel_enabled(channel_id) {
+        Ok(true) => {
+            if let Err(e) = ctx.community_db.set_channel_enabled(channel_id, false, &npub) {
+                tracing::error!("Failed to disable channel: {}", e);
+                msg.reply("⚠️ Failed to disable channel.").await?;
+                return Ok(());
+            }
+            msg.reply("🔇 Bot disabled for this channel. I'll stop responding here. Use !enable to turn me back on.").await?;
+            tracing::info!("Channel {} disabled by {}", channel_id, npub);
+        }
+        Ok(false) => {
+            msg.reply("🔇 This channel is already disabled.").await?;
+        }
+        Err(e) => {
+            tracing::error!("Channel state check failed: {}", e);
+            msg.reply("⚠️ Could not check channel state.").await?;
+        }
+    }
+    Ok(())
+}
+
 // =============================================================================
 // COMMAND REGISTRY — single source of truth for help generation
 // =============================================================================
@@ -665,6 +755,8 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!add",      description: "Authorize a user",                   feature: None, auth: AuthLevel::Owner },
     CommandMeta { name: "!remove",   description: "Deauthorize a user",                 feature: None, auth: AuthLevel::Owner },
     CommandMeta { name: "!list",     description: "List authorized users",              feature: None, auth: AuthLevel::Owner },
+    CommandMeta { name: "!enable",   description: "Enable bot in this channel",          feature: None, auth: AuthLevel::Owner },
+    CommandMeta { name: "!disable",  description: "Disable bot in this channel",         feature: None, auth: AuthLevel::Owner },
 
     // Utility
     CommandMeta { name: "!price",    description: "Bitcoin price (USD)",                feature: Some(Feature::Utility), auth: AuthLevel::Public },

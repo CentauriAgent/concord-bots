@@ -164,6 +164,13 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_xp_log_npub ON xp_log(npub);
             CREATE INDEX IF NOT EXISTS idx_giveaway_entries_id ON giveaway_entries(giveaway_id);
             CREATE INDEX IF NOT EXISTS idx_users_xp ON users(xp DESC);
+
+            CREATE TABLE IF NOT EXISTS channel_state (
+                channel_id  TEXT PRIMARY KEY,
+                enabled     INTEGER DEFAULT 1,
+                updated_at  INTEGER,
+                updated_by  TEXT
+            );
             ",
         )?;
         Ok(Self {
@@ -583,6 +590,56 @@ impl Database {
             None => Ok(false),
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Channel State (enable/disable per channel)
+    // ---------------------------------------------------------------------
+
+    /// Check if a channel is enabled. Returns `true` if no state exists
+    /// (default: enabled for backward compat with existing channels).
+    pub fn is_channel_enabled(&self, channel_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let enabled: Option<i64> = conn
+            .query_row(
+                "SELECT enabled FROM channel_state WHERE channel_id = ?1",
+                rusqlite::params![channel_id],
+                |row| row.get(0),
+            )
+            .ok();
+        match enabled {
+            Some(0) => Ok(false),
+            _ => Ok(true), // no row = enabled (default)
+        }
+    }
+
+    /// Set channel enabled state. Creates the row if it doesn't exist.
+    pub fn set_channel_enabled(
+        &self,
+        channel_id: &str,
+        enabled: bool,
+        updated_by: &str,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO channel_state (channel_id, enabled, updated_at, updated_by) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(channel_id) DO UPDATE SET enabled = ?2, updated_at = ?3, updated_by = ?4",
+            rusqlite::params![channel_id, enabled as i32, now(), updated_by],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a channel as disabled. Used when the bot joins a new community
+    /// and we want all channels to start in the opt-in state.
+    pub fn disable_channel(&self, channel_id: &str) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO channel_state (channel_id, enabled, updated_at, updated_by) \
+             VALUES (?1, 0, ?2, 'system')",
+            rusqlite::params![channel_id, now()],
+        )?;
+        Ok(())
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -724,5 +781,43 @@ mod tests {
         let stats = db.get_user("nonexistent").unwrap();
         assert_eq!(stats.xp, 0);
         assert_eq!(stats.level, 0);
+    }
+
+    #[test]
+    fn test_channel_state_default_enabled() {
+        let db = test_db();
+        // No row = enabled (backward compat)
+        assert!(db.is_channel_enabled("ch1").unwrap());
+    }
+
+    #[test]
+    fn test_channel_disable_enable() {
+        let db = test_db();
+        // Disable
+        db.set_channel_enabled("ch1", false, "npub1owner").unwrap();
+        assert!(!db.is_channel_enabled("ch1").unwrap());
+        // Re-enable
+        db.set_channel_enabled("ch1", true, "npub1owner").unwrap();
+        assert!(db.is_channel_enabled("ch1").unwrap());
+    }
+
+    #[test]
+    fn test_disable_channel_idempotent() {
+        let db = test_db();
+        db.disable_channel("ch1").unwrap();
+        assert!(!db.is_channel_enabled("ch1").unwrap());
+        // Calling again shouldn't flip it back to enabled (INSERT OR IGNORE)
+        db.disable_channel("ch1").unwrap();
+        assert!(!db.is_channel_enabled("ch1").unwrap());
+    }
+
+    #[test]
+    fn test_enable_after_disable_channel() {
+        let db = test_db();
+        db.disable_channel("ch1").unwrap();
+        assert!(!db.is_channel_enabled("ch1").unwrap());
+        // Owner explicitly enables
+        db.set_channel_enabled("ch1", true, "npub1owner").unwrap();
+        assert!(db.is_channel_enabled("ch1").unwrap());
     }
 }

@@ -187,8 +187,14 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MemberJoin { channel_id, npub } => {
             tracing::info!("Member {} joined channel {}", npub, channel_id);
 
-            // Don't welcome ourselves
+            // If the bot itself is joining a new channel, mark it disabled by default.
+            // The community owner can then !enable it explicitly.
             if npub == ctx.bot.npub() {
+                if let Err(e) = ctx.community_db.disable_channel(channel_id) {
+                    tracing::warn!("Failed to mark channel {} as disabled-on-join: {}", channel_id, e);
+                } else {
+                    tracing::info!("Channel {} marked disabled (opt-in default)", channel_id);
+                }
                 return Ok(());
             }
 
