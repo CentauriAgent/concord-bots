@@ -163,9 +163,9 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
             _ => format!("{}.", i + 1),
         };
         lines.push(format!(
-            "{} {} — Level {} ({} XP)",
+            "{} nostr:{} — Level {} ({} XP)",
             medal,
-            short_npub(npub),
+            npub,
             level,
             xp
         ));
