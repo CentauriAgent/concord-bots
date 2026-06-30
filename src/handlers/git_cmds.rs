@@ -150,7 +150,7 @@ pub async fn git_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
     }
 
     let mut lines = vec![format!("📦 Repo subscriptions in this channel ({})", subs.len())];
-    for sub in &subs {
+    for (i, sub) in subs.iter().enumerate() {
         let host_icon = match sub.host {
             RepoHost::GitHub => "🐙",
             RepoHost::GitLab => "🦊",
@@ -161,11 +161,11 @@ pub async fn git_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
             ""
         };
         lines.push(format!(
-            "{} #{} {} — {}{}",
-            host_icon, sub.id, sub.full_slug, sub.host.base_url(), status
+            "{}. {} {} — {}{}",
+            i + 1, host_icon, sub.full_slug, sub.host.base_url(), status
         ));
     }
-    lines.push("\nUse !git remove <slug> to unsubscribe.".to_string());
+    lines.push("\nUse !git remove <number|slug> to unsubscribe.".to_string());
 
     msg.reply(&lines.join("\n")).await?;
     Ok(())
@@ -197,16 +197,36 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
 
     let channel_id = &msg.chat_id;
 
-    // Try parsing as numeric ID first
-    if let Ok(id) = input.parse::<i64>() {
-        match store.remove_by_id(id) {
+    // Try parsing as a positional number (1-based index into this channel's list)
+    if let Ok(pos) = input.parse::<usize>() {
+        if pos == 0 {
+            msg.reply("⚠️ Numbers start at 1. Use !git list to see positions.").await?;
+            return Ok(());
+        }
+        let subs = match store.list_for_channel(channel_id) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Git monitor: list error during remove: {}", e);
+                msg.reply("⚠️ Could not look up subscriptions.").await?;
+                return Ok(());
+            }
+        };
+        if pos > subs.len() {
+            msg.reply(&format!(
+                "⚠️ No subscription #{}. This channel has {} repo(s). Use !git list to see them.",
+                pos, subs.len()
+            ))
+            .await?;
+            return Ok(());
+        }
+        let sub = &subs[pos - 1];
+        match store.remove_by_id(sub.id) {
             Ok(true) => {
-                msg.reply(&format!("✅ Removed subscription #{}.", id)).await?;
-                tracing::info!("Git monitor: removed subscription #{}", id);
+                msg.reply(&format!("✅ Removed {} (was #{})", sub.full_slug, pos)).await?;
+                tracing::info!("Git monitor: removed {} from channel {}", sub.full_slug, channel_id);
             }
             Ok(false) => {
-                msg.reply(&format!("⚠️ No subscription with ID {} in this channel.", id))
-                    .await?;
+                msg.reply("⚠️ Subscription vanished before removal.").await?;
             }
             Err(e) => {
                 tracing::warn!("Git monitor: remove error: {}", e);
