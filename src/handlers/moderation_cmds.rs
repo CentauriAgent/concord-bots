@@ -63,6 +63,38 @@ fn save_warnings(warnings: &[Warning]) {
 }
 
 // -----------------------------------------------------------------------------
+// !leave — Leave the current community (owner only)
+// -----------------------------------------------------------------------------
+
+pub async fn leave_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
+    let community = match msg.community() {
+        Some(c) => c,
+        None => {
+            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+
+    let community_id = community.id().to_string();
+
+    msg.reply(&format!("👋 Leaving community... ({})", community_id)).await?;
+
+    match community.leave().await {
+        Ok(()) => {
+            msg.reply("✅ Successfully left the community. Goodbye! 👋").await?;
+            tracing::info!("Bot left community {} (requested by owner)", community_id);
+        }
+        Err(e) => {
+            let err_text = format!("{:?}", e);
+            tracing::error!("Failed to leave community {}: {}", community_id, err_text);
+            msg.reply(&format!("⚠️ Could not leave the community: {}", err_text)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
 // !kick <npub> — Kick a member (cooperative)
 // -----------------------------------------------------------------------------
 

@@ -335,6 +335,14 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             dispatch_moderation(ctx, msg, command, args).await?;
         }
 
+        "!leave"
+            if features.moderation => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            dispatch_moderation(ctx, msg, command, args).await?;
+        }
+
         "!welcome"
             if features.community => {
             if !require_auth(ctx, msg, AuthLevel::Owner).await? {
@@ -525,6 +533,7 @@ async fn dispatch_moderation(
     args: &str,
 ) -> Result<()> {
     match command {
+        "!leave" => moderation_cmds::leave_command(ctx, msg, args).await?,
         "!kick" => moderation_cmds::kick_command(ctx, msg, args).await?,
         "!ban" => moderation_cmds::ban_command(ctx, msg, args).await?,
         "!unban" => moderation_cmds::unban_command(ctx, msg, args).await?,
@@ -801,6 +810,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!welcome", description: "Toggle welcome messages on/off",       feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+    CommandMeta { name: "!leave",     description: "Leave the current community",          feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
 
     // Community Engagement
     CommandMeta { name: "!level",     description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
