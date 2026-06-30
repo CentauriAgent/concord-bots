@@ -17,12 +17,14 @@
 nsec = "auto"
 
 # Who can invite this bot to communities?
-#   "public"   — accept invites from anyone
-#   "whitelist" — only accept from npubs listed below
-#   "manual"   — requires manual acceptance (default)
-invite_policy = "manual"
+#   "owner"      — ONLY the auth.owner npub can invite (default)
+#   "authorized"  — auth.owner + all auth.authorized npubs can invite
+#   "public"     — accept invites from anyone
+#   "whitelist"  — (legacy) only npubs in bot.whitelist below
+#   "manual"     — park all invites, require explicit acceptance
+invite_policy = "owner"
 
-# Only used when invite_policy = "whitelist"
+# Only used when invite_policy = "whitelist" (legacy)
 # whitelist = [
 #   "npub1abcdef...",
 #   "npub1ghijkl...",

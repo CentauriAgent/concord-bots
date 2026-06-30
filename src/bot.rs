@@ -81,7 +81,18 @@ pub async fn run(config: BotConfig) -> Result<()> {
             builder = builder.public();
         }
         crate::config::InvitePolicyConfig::Whitelist(ref npubs) => {
-            tracing::info!("Invite policy: whitelist ({} accounts)", npubs.len());
+            // Determine which policy name to display
+            let policy_name = match config.bot.invite_policy.as_str() {
+                "authorized" => "authorized",
+                "whitelist" => "whitelist (legacy)",
+                "" => "owner (default)",
+                _ => "owner",
+            };
+            tracing::info!(
+                "Invite policy: {} ({} allowed npubs)",
+                policy_name,
+                npubs.len()
+            );
             builder = builder.whitelist(npubs.iter().map(|s| s.as_str()));
         }
         crate::config::InvitePolicyConfig::Manual => {

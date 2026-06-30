@@ -110,7 +110,14 @@ pub struct BotSection {
     /// If neither is set, the SDK auto-generates and persists one.
     pub nsec: Option<String>,
 
-    /// Invite policy: "public", "whitelist", or "manual" (default).
+    /// Invite policy controlling who can add the bot to communities.
+    ///
+    /// Options:
+    ///   "owner"      — accept invites ONLY from `auth.owner` npub (default)
+    ///   "authorized"  — accept from `auth.owner` + all `auth.authorized` npubs
+    ///   "public"     — accept invites from anyone
+    ///   "whitelist"  — (legacy) accept from npubs in `bot.whitelist` list
+    ///   "manual"     — park all invites, require explicit acceptance
     #[serde(default)]
     pub invite_policy: String,
 
@@ -259,13 +266,77 @@ impl BotConfig {
     }
 
     /// Parse the invite policy from config.
+    ///
+    /// Default (empty/unrecognized) is `Owner` — only the auth owner can invite.
     pub fn invite_policy(&self) -> InvitePolicyConfig {
         match self.bot.invite_policy.as_str() {
             "public" => InvitePolicyConfig::Public,
+            "authorized" => {
+                // Owner + all authorized npubs
+                let mut npubs: Vec<String> = Vec::new();
+                if let Some(ref owner) = self.auth.owner {
+                    if !owner.is_empty() {
+                        npubs.push(owner.clone());
+                    }
+                }
+                npubs.extend(self.auth.authorized.iter().cloned());
+                if npubs.is_empty() {
+                    tracing::warn!(
+                        "invite_policy = \"authorized\" but no owner or authorized npubs configured — falling back to manual"
+                    );
+                    return InvitePolicyConfig::Manual;
+                }
+                InvitePolicyConfig::Whitelist(npubs)
+            }
+            "owner" => {
+                // Only the owner can invite
+                match &self.auth.owner {
+                    Some(owner) if !owner.is_empty() => {
+                        InvitePolicyConfig::Whitelist(vec![owner.clone()])
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "invite_policy = \"owner\" but no auth.owner configured — falling back to manual"
+                        );
+                        InvitePolicyConfig::Manual
+                    }
+                }
+            }
             "whitelist" if !self.bot.whitelist.is_empty() => {
+                // Legacy: use bot.whitelist list
+                tracing::info!("invite_policy = \"whitelist\" is deprecated — consider \"owner\" or \"authorized\" instead");
                 InvitePolicyConfig::Whitelist(self.bot.whitelist.clone())
             }
-            _ => InvitePolicyConfig::Manual,
+            "whitelist" => {
+                tracing::warn!(
+                    "invite_policy = \"whitelist\" but bot.whitelist is empty — falling back to manual"
+                );
+                InvitePolicyConfig::Manual
+            }
+            "manual" => InvitePolicyConfig::Manual,
+            "" => {
+                // Default when not specified: owner-only
+                self.invite_policy_owner_default()
+            }
+            other => {
+                tracing::warn!("Unknown invite_policy \"{}\" — defaulting to owner", other);
+                self.invite_policy_owner_default()
+            }
+        }
+    }
+
+    /// Resolve the default invite policy (owner-only, falling back to manual).
+    fn invite_policy_owner_default(&self) -> InvitePolicyConfig {
+        match &self.auth.owner {
+            Some(owner) if !owner.is_empty() => {
+                InvitePolicyConfig::Whitelist(vec![owner.clone()])
+            }
+            _ => {
+                tracing::warn!(
+                    "No auth.owner configured — invite policy defaults to manual"
+                );
+                InvitePolicyConfig::Manual
+            }
         }
     }
 
@@ -273,7 +344,12 @@ impl BotConfig {
     pub fn log_summary(&self) {
         tracing::info!("Config summary:");
         tracing::info!("  nsec: {}", if self.bot_nsec().is_some() { "provided" } else { "auto-generate" });
-        tracing::info!("  invite_policy: {}", self.bot.invite_policy);
+        let policy_display = if self.bot.invite_policy.is_empty() {
+            "owner (default)"
+        } else {
+            &self.bot.invite_policy
+        };
+        tracing::info!("  invite_policy: {}", policy_display);
         if let Some(ref owner) = self.auth.owner {
             tracing::info!("  auth owner: {}", owner);
             tracing::info!("  auth authorized (seed): {}", self.auth.authorized.len());
@@ -455,6 +531,83 @@ mod tests {
         // bot_nsec() may find the SDK's persisted identity file, so only check
         // that the config field itself is None.
         assert!(config.bot.nsec.is_none());
+        // Default with no owner configured falls back to Manual
+        assert!(matches!(config.invite_policy(), InvitePolicyConfig::Manual));
+    }
+
+    #[test]
+    fn test_default_config_owner_policy() {
+        // When owner is configured, default (empty) invite_policy should resolve to owner-only
+        let toml_str = r#"
+[bot]
+invite_policy = ""
+[auth]
+owner = "npub1owner..."
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        match config.invite_policy() {
+            InvitePolicyConfig::Whitelist(npubs) => {
+                assert_eq!(npubs, vec!["npub1owner..."]);
+            }
+            other => panic!("Expected Whitelist with owner, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invite_policy_owner() {
+        let toml_str = r#"
+[bot]
+invite_policy = "owner"
+[auth]
+owner = "npub1owner..."
+authorized = ["npub1friend..."]
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        match config.invite_policy() {
+            InvitePolicyConfig::Whitelist(npubs) => {
+                assert_eq!(npubs, vec!["npub1owner..."]);
+            }
+            other => panic!("Expected Whitelist([owner]), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invite_policy_authorized() {
+        let toml_str = r#"
+[bot]
+invite_policy = "authorized"
+[auth]
+owner = "npub1owner..."
+authorized = ["npub1friend1...", "npub1friend2..."]
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        match config.invite_policy() {
+            InvitePolicyConfig::Whitelist(npubs) => {
+                assert_eq!(npubs, vec!["npub1owner...", "npub1friend1...", "npub1friend2..."]);
+            }
+            other => panic!("Expected Whitelist with owner+authorized, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invite_policy_owner_no_owner_configured() {
+        let toml_str = r#"
+[bot]
+invite_policy = "owner"
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        // Falls back to Manual when no owner configured
+        assert!(matches!(config.invite_policy(), InvitePolicyConfig::Manual));
+    }
+
+    #[test]
+    fn test_invite_policy_authorized_no_owner_configured() {
+        let toml_str = r#"
+[bot]
+invite_policy = "authorized"
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        // Falls back to Manual when no owner/authorized configured
         assert!(matches!(config.invite_policy(), InvitePolicyConfig::Manual));
     }
 
@@ -463,7 +616,7 @@ mod tests {
         let toml_str = r#"
 [bot]
 nsec = "nsec1test..."
-invite_policy = "public"
+invite_policy = "authorized"
 display_name = "Test Bot"
 
 [auth]
@@ -475,11 +628,18 @@ join = ["abc123"]
 "#;
         let config: BotConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.bot.nsec.as_deref(), Some("nsec1test..."));
-        assert_eq!(config.bot.invite_policy, "public");
+        assert_eq!(config.bot.invite_policy, "authorized");
         assert_eq!(config.bot.display_name.as_deref(), Some("Test Bot"));
         assert_eq!(config.auth.owner.as_deref(), Some("npub1owner..."));
         assert_eq!(config.auth.authorized, vec!["npub1friend..."]);
         assert_eq!(config.communities.join, vec!["abc123"]);
+        // Verify it resolves to whitelist with owner + authorized
+        match config.invite_policy() {
+            InvitePolicyConfig::Whitelist(npubs) => {
+                assert_eq!(npubs, vec!["npub1owner...", "npub1friend..."]);
+            }
+            other => panic!("Expected Whitelist, got {:?}", other),
+        }
     }
 
     #[test]
