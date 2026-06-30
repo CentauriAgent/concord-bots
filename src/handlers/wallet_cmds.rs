@@ -14,6 +14,7 @@ use tokio::io::AsyncWriteExt;
 use vector_sdk::IncomingMessage;
 
 use crate::bot::BotContext;
+use crate::handlers::normalize_npub;
 use crate::lib::http;
 
 // -----------------------------------------------------------------------------
@@ -257,13 +258,13 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
 
     // Parse: <npub> <sats> [optional message]
     let parts: Vec<&str> = args.splitn(3, char::is_whitespace).collect();
-    let npub_input = parts[0];
+    let npub_input = normalize_npub(parts[0]);
     let sats_str = parts.get(1).copied().unwrap_or("");
     let zap_message = parts.get(2).copied().unwrap_or("");
 
     // Validate npub format
     if !npub_input.starts_with("npub1") {
-        msg.reply("⚠️ Invalid npub format. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -300,7 +301,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     msg.reply("⚡ Creating NIP-57 zap...").await?;
 
     // -- Step 1: Resolve npub → hex pubkey --
-    let hex_pubkey = match resolve_hex_pubkey(npub_input).await {
+    let hex_pubkey = match resolve_hex_pubkey(&npub_input).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve npub {}: {}", npub_input, e);
@@ -411,7 +412,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Ok(_) => {
             msg.reply(&format!(
                 "⚡ Zapped {} {} sats! (NIP-57 receipt published by recipient's service)",
-                npub_input, sats
+                &npub_input, sats
             )).await?;
 
             // Community XP: sender gets +5, recipient gets +10
@@ -424,7 +425,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
                 }
             }
             // Award recipient XP (using npub_input as the recipient identifier)
-            if let Err(e) = ctx.community_db.award_xp(npub_input, 10, &msg.chat_id) {
+            if let Err(e) = ctx.community_db.award_xp(&npub_input, 10, &msg.chat_id) {
                 tracing::warn!("Failed to award zap XP to recipient: {}", e);
             }
         }

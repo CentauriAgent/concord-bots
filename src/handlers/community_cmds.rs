@@ -16,6 +16,7 @@ use std::time::Duration;
 use vector_sdk::IncomingMessage;
 
 use crate::bot::BotContext;
+use crate::handlers::normalize_npub;
 use crate::community::{
     xp_for_level, xp_in_current_level, Database,
 };
@@ -97,7 +98,7 @@ pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) 
     let target_npub = if args.trim().is_empty() {
         msg.message.npub.clone().unwrap_or_default()
     } else {
-        args.trim().to_string()
+        normalize_npub(args)
     };
 
     if target_npub.is_empty() {
@@ -182,7 +183,7 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let target_npub = if args.trim().is_empty() {
         msg.message.npub.clone().unwrap_or_default()
     } else {
-        args.trim().to_string()
+        normalize_npub(args)
     };
 
     if target_npub.is_empty() {
@@ -492,7 +493,7 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         msg.reply(&format!("⭐ Your reputation: {}", stats.rep)).await?;
         return Ok(());
     } else {
-        args.trim().to_string()
+        normalize_npub(args)
     };
 
     if sender.is_empty() {

@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use vector_sdk::IncomingMessage;
 
 use crate::bot::BotContext;
+use crate::handlers::normalize_npub;
 
 // -----------------------------------------------------------------------------
 // Warnings storage
@@ -99,15 +100,15 @@ pub async fn leave_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str)
 // -----------------------------------------------------------------------------
 
 pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !kick <npub>\nExample: !kick npub1abc...").await?;
+        msg.reply("Usage: !kick <npub>\nExample: !kick nostr:npub1abc...  OR  !kick npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -127,7 +128,7 @@ pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
     }
 
     // Check if target is the owner.
-    let target_member = community.member(npub);
+    let target_member = community.member(&npub);
     if target_member.is_owner() {
         msg.reply("⚠️ I can't kick the community owner.").await?;
         return Ok(());
@@ -159,15 +160,15 @@ pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
 // -----------------------------------------------------------------------------
 
 pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !ban <npub>\nExample: !ban npub1abc...").await?;
+        msg.reply("Usage: !ban <npub>\nExample: !ban nostr:npub1abc...  OR  !ban npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -184,7 +185,7 @@ pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -
         return Ok(());
     }
 
-    let target_member = community.member(npub);
+    let target_member = community.member(&npub);
     if target_member.is_owner() {
         msg.reply("⚠️ I can't ban the community owner.").await?;
         return Ok(());
@@ -216,15 +217,15 @@ pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -
 // -----------------------------------------------------------------------------
 
 pub async fn unban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !unban <npub>\nExample: !unban npub1abc...").await?;
+        msg.reply("Usage: !unban <npub>\nExample: !unban nostr:npub1abc...  OR  !unban npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -236,7 +237,7 @@ pub async fn unban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         }
     };
 
-    let target_member = community.member(npub);
+    let target_member = community.member(&npub);
 
     match target_member.unban().await {
         Ok(()) => {
@@ -273,16 +274,16 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
 
     // Parse: first token is npub, rest is reason
     let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
-    let npub = parts[0];
+    let npub = normalize_npub(parts[0]);
     let reason = parts.get(1).copied().unwrap_or("").trim();
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
     if reason.is_empty() {
-        msg.reply("⚠️ Please provide a reason.\nExample: !warn npub1abc... Spamming links").await?;
+        msg.reply("⚠️ Please provide a reason.\nExample: !warn nostr:npub1abc... Spamming links  OR  !warn npub1abc... Spamming links").await?;
         return Ok(());
     }
 
@@ -290,7 +291,7 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
     let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
 
     let warning = Warning {
-        npub: npub.to_string(),
+        npub: npub.clone(),
         reason: reason.to_string(),
         timestamp: timestamp.clone(),
         warned_by,
@@ -315,15 +316,15 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
 // -----------------------------------------------------------------------------
 
 pub async fn warnings_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !warnings <npub>\nExample: !warnings npub1abc...").await?;
+        msg.reply("Usage: !warnings <npub>\nExample: !warnings nostr:npub1abc...  OR  !warnings npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -395,15 +396,15 @@ pub async fn mods_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str)
 // -----------------------------------------------------------------------------
 
 pub async fn grantmod_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !grantmod <npub>\nExample: !grantmod npub1abc...").await?;
+        msg.reply("Usage: !grantmod <npub>\nExample: !grantmod nostr:npub1abc...  OR  !grantmod npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -415,7 +416,7 @@ pub async fn grantmod_command(_ctx: &BotContext, msg: &IncomingMessage, args: &s
         }
     };
 
-    let target_member = community.member(npub);
+    let target_member = community.member(&npub);
 
     // Check if already admin
     if target_member.is_admin() {
@@ -449,15 +450,15 @@ pub async fn grantmod_command(_ctx: &BotContext, msg: &IncomingMessage, args: &s
 // -----------------------------------------------------------------------------
 
 pub async fn revokemod_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let npub = args.trim();
+    let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !revokemod <npub>\nExample: !revokemod npub1abc...").await?;
+        msg.reply("Usage: !revokemod <npub>\nExample: !revokemod nostr:npub1abc...  OR  !revokemod npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -470,7 +471,7 @@ pub async fn revokemod_command(_ctx: &BotContext, msg: &IncomingMessage, args: &
     };
 
     // Don't revoke from owner.
-    let target_member = community.member(npub);
+    let target_member = community.member(&npub);
     if target_member.is_owner() {
         msg.reply("⚠️ Cannot revoke admin from the community owner.").await?;
         return Ok(());

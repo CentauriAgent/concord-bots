@@ -29,6 +29,31 @@ use vector_sdk::{BotEvent, VectorBot};
 use crate::bot::BotContext;
 use crate::config::Feature;
 
+#[cfg(test)]
+mod normalize_tests {
+    use super::normalize_npub;
+
+    #[test]
+    fn test_normalize_npub_nostr_prefix() {
+        assert_eq!(normalize_npub("nostr:npub1abc"), "npub1abc");
+    }
+
+    #[test]
+    fn test_normalize_npub_at_sign() {
+        assert_eq!(normalize_npub("@npub1abc"), "npub1abc");
+    }
+
+    #[test]
+    fn test_normalize_npub_plain() {
+        assert_eq!(normalize_npub("npub1abc"), "npub1abc");
+    }
+
+    #[test]
+    fn test_normalize_npub_whitespace() {
+        assert_eq!(normalize_npub("  nostr:npub1abc  "), "npub1abc");
+    }
+}
+
 /// Track recently welcomed members to prevent duplicate welcomes.
 /// Maps (channel_id, npub) -> last welcome time.
 static WELCOMED: Lazy<Mutex<HashMap<(String, String), Instant>>> =
@@ -49,6 +74,17 @@ pub fn set_welcome_enabled(enabled: bool) {
 /// Check if welcome messages are currently enabled.
 pub fn is_welcome_enabled() -> bool {
     *WELCOME_ENABLED.lock().unwrap()
+}
+
+/// Normalize a user-supplied npub argument:
+/// - Strips leading `nostr:` prefix (NIP-27 mention format)
+/// - Strips leading `@` (redundant but defensive)
+/// - Trims whitespace
+pub fn normalize_npub(input: &str) -> String {
+    let s = input.trim();
+    let s = s.strip_prefix("nostr:").unwrap_or(s);
+    let s = s.strip_prefix('@').unwrap_or(s);
+    s.to_string()
 }
 
 pub mod commands;

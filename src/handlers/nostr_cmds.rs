@@ -14,6 +14,7 @@ use std::time::Duration;
 use vector_sdk::IncomingMessage;
 
 use crate::bot::BotContext;
+use crate::handlers::normalize_npub;
 use crate::lib::http;
 
 // -----------------------------------------------------------------------------
@@ -41,7 +42,7 @@ const NAK_TIMEOUT_SECS: u64 = 15;
 // -----------------------------------------------------------------------------
 
 pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let input = args.trim();
+    let input = normalize_npub(args);
 
     if input.is_empty() {
         msg.reply("Usage: !nostr <npub>\nExample: !nostr npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
@@ -49,7 +50,7 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
     }
 
     // Convert npub → hex if needed
-    let hex_pubkey = match resolve_pubkey(input).await {
+    let hex_pubkey = match resolve_pubkey(&input).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve pubkey {}: {}", input, e);
@@ -209,7 +210,7 @@ pub async fn nip05_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
 // -----------------------------------------------------------------------------
 
 pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
-    let input = args.trim();
+    let input = normalize_npub(args);
 
     if input.is_empty() {
         msg.reply("Usage: !follow <npub>\nExample: !follow npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
@@ -226,7 +227,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
     };
 
     // Resolve the target pubkey to hex
-    let target_hex = match resolve_pubkey(input).await {
+    let target_hex = match resolve_pubkey(&input).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve pubkey {}: {}", input, e);

@@ -25,7 +25,7 @@ use crate::handlers::wallet_cmds;
 use crate::handlers::nostr_cmds;
 use crate::handlers::moderation_cmds;
 use crate::handlers::community_cmds;
-use crate::handlers::git_cmds;
+use crate::handlers::{normalize_npub, git_cmds};
 use crate::rate_limiter::RateLimitResult;
 
 /// Track last !help per channel to prevent spam. Maps channel_id -> last help time.
@@ -601,28 +601,28 @@ async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Res
         return Ok(());
     };
 
-    let npub = args.trim();
+    let npub = normalize_npub(args);
     if npub.is_empty() {
-        msg.reply("Usage: !add <npub>").await?;
+        msg.reply("Usage: !add <npub>\nExample: !add nostr:npub1abc...  OR  !add npub1abc...").await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. npubs start with \"npub1\".").await?;
+        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
-    if auth.is_owner(npub) {
+    if auth.is_owner(&npub) {
         msg.reply("ℹ️ That npub is already the owner — no need to add.").await?;
         return Ok(());
     }
 
-    if auth.is_authorized(npub) {
+    if auth.is_authorized(&npub) {
         msg.reply(&format!("ℹ️ {} is already authorized.", npub)).await?;
         return Ok(());
     }
 
-    auth.add(npub);
+    auth.add(&npub);
     msg.reply(&format!("✅ Added {} to authorized users.", npub)).await?;
     tracing::info!("Authorized user added: {}", npub);
     Ok(())
@@ -634,23 +634,23 @@ async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> 
         return Ok(());
     };
 
-    let npub = args.trim();
+    let npub = normalize_npub(args);
     if npub.is_empty() {
-        msg.reply("Usage: !remove <npub>").await?;
+        msg.reply("Usage: !remove <npub>\nExample: !remove nostr:npub1abc...  OR  !remove npub1abc...").await?;
         return Ok(());
     }
 
-    if auth.is_owner(npub) {
+    if auth.is_owner(&npub) {
         msg.reply("⚠️ Cannot remove the owner.").await?;
         return Ok(());
     }
 
-    if !auth.is_authorized(npub) {
+    if !auth.is_authorized(&npub) {
         msg.reply(&format!("ℹ️ {} is not in the authorized list.", npub)).await?;
         return Ok(());
     }
 
-    auth.remove(npub);
+    auth.remove(&npub);
     msg.reply(&format!("✅ Removed {} from authorized users.", npub)).await?;
     tracing::info!("Authorized user removed: {}", npub);
     Ok(())
