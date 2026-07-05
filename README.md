@@ -48,9 +48,13 @@ concord-bots/
 │   │   ├── mod.rs         ← Handler dispatch
 │   │   ├── commands.rs    ← !command handlers
 │   │   ├── scheduled.rs   ← Scheduled/cron tasks
+│   │   ├── wallet_cmds.rs ← !balance, !tip, !zap, etc.
 │   │   └── ai_bridge.rs   ← AI integration (optional)
+│   ├── wallet/            ← Cashu ecash wallet
 │   └── lib/               ← Pre-built utilities (stable — don't edit)
 │       ├── http.rs        ← HTTP fetch helper
+│       ├── nip98.rs       ← NIP-98 HTTP auth
+│       ├── npub_cash.rs   ← npub.cash claim client
 │       ├── scheduler.rs   ← Interval scheduler
 │       └── vector_client.rs ← SDK convenience wrappers
 ├── config/
@@ -95,6 +99,11 @@ concord-bots/
 | `!git list` | Public | List this channel's repo subscriptions |
 | `!git remove <repo\|id>` | Authorized+ | Unsubscribe from a repo |
 | `!git poll` | Owner | Force-poll all subscriptions in this channel |
+| `!balance` | Public | Show wallet balance (sats) |
+| `!tip <sats>` | Authorized+ | Send a Cashu token tip |
+| `!deposit [sats]` | Authorized+ | Generate BOLT11 invoice to add funds |
+| `!withdraw <invoice>` | Authorized+ | Pay a BOLT11 invoice from wallet |
+| `!zap <npub> <sats> [msg]` | Authorized+ | NIP-57 Lightning zap to a Nostr user |
 
 ## Authorization System
 
@@ -120,6 +129,70 @@ persist = true                      # save across restarts (default)
 When not configured, all commands are public (backward-compatible).
 
 See [`AGENTS.md`](AGENTS.md) for details on adding auth checks to custom commands.
+
+## Wallet & Zaps
+
+The framework includes a built-in **Cashu wallet** that can send and receive Lightning payments via ecash. Both directions are supported:
+
+- **Send zaps:** `!zap <npub> <sats> [message]` — full NIP-57 zap flow (resolves lud16, signs kind 9734, pays BOLT11 from wallet)
+- **Receive zaps:** automatic via [npub.cash](https://npub.cash) — any zaps to `<your-bot-npub>@npub.cash` are claimed every 5 minutes and credited to the wallet
+
+### Setup
+
+**1. Enable the wallet** in `config/bot.toml`:
+
+```toml
+[wallet]
+enabled = true
+mint_url = "https://mint.minibits.cash/Bitcoin"
+```
+
+**2. Set the bot's Lightning address** so it can receive zaps:
+
+```toml
+[bot]
+lud16 = "<your-bot-npub>@npub.cash"
+
+[npub_cash]
+enabled = true
+url = "https://npub.cash"
+claim_interval_secs = 300  # poll every 5 minutes
+```
+
+Any Lightning wallet (Wallet of Satoshi, Damus, Muun, etc.) can now zap `<your-bot-npub>@npub.cash`. The bot claims tokens automatically — no manual intervention.
+
+### Wallet commands
+
+| Command | Auth Level | Description |
+|---------|------------|-------------|
+| `!balance` | Public | Show wallet balance in sats |
+| `!tip <sats>` | Authorized+ | Send a Cashu token tip |
+| `!deposit [sats]` | Authorized+ | Generate a BOLT11 invoice to add funds |
+| `!withdraw <invoice>` | Authorized+ | Pay a BOLT11 invoice from the wallet |
+| `!zap <npub> <sats> [msg]` | Authorized+ | NIP-57 zap to another Nostr user |
+
+### How receiving works
+
+The bot uses [npub.cash](https://npub.cash), a free service that acts as a Lightning→Cashu bridge:
+
+1. Someone zaps `<bot-npub>@npub.cash` via any Lightning wallet
+2. npub.cash receives the payment, mints Cashu tokens on the same mint the bot uses
+3. The bot's scheduled task (every 5 min) authenticates via **NIP-98** (signed kind 27235 Nostr event) and claims the tokens
+4. Tokens are received into the bot's Cashu wallet
+5. Bot announces `⚡ Received N sats via npub.cash zap!` in its primary community channel
+
+No manual claim step. No separate wallet. The bot's single Cashu wallet handles both inbound zaps and outbound payments.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `src/wallet/mod.rs` | Cashu wallet wrapper (CDK-based) |
+| `src/lib/nip98.rs` | NIP-98 HTTP auth header builder |
+| `src/lib/npub_cash.rs` | npub.cash claim/balance client |
+| `src/handlers/wallet_cmds.rs` | `!balance`, `!tip`, `!zap`, etc. |
+| `src/bin/sweep_wallet.rs` | Ops: sweep wallet to a single token |
+| `src/bin/melt_to_ln.rs` | Ops: melt balance to a Lightning address |
 
 ## Deployment
 
