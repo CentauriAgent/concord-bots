@@ -60,13 +60,33 @@ pub async fn claim(base_url: &str, nsec: &str) -> Result<ClaimResult> {
     }
 
     // Extract token strings from the response.
+    // npub.cash response shapes observed:
+    //   No tokens:   {"error": true, "message": "No proofs to claim"}
+    //   Has tokens:  {"error": false, "data": {"token": "cashuA...", "count": N, "totalPending": N}}
+    //   Alt shape:   {"error": false, "data": "cashuA..."}  (string directly)
+    //   Alt shape:   {"error": false, "data": ["cashuA...", ...]}  (array of strings)
     let mut tokens: Vec<String> = Vec::new();
-    if let Some(data_str) = body.get("data").and_then(|d| d.as_str()) {
-        tokens.push(data_str.to_string());
-    } else if let Some(data_arr) = body.get("data").and_then(|d| d.as_array()) {
-        for item in data_arr {
-            if let Some(s) = item.as_str() {
+    if let Some(data) = body.get("data") {
+        if let Some(s) = data.as_str() {
+            tokens.push(s.to_string());
+        } else if let Some(arr) = data.as_array() {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    tokens.push(s.to_string());
+                }
+            }
+        } else if let Some(obj) = data.as_object() {
+            // Object with "token" field (the shape npub.cash actually returns)
+            if let Some(s) = obj.get("token").and_then(|t| t.as_str()) {
                 tokens.push(s.to_string());
+            }
+            // May also have "tokens" array
+            if let Some(arr) = obj.get("tokens").and_then(|t| t.as_array()) {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        tokens.push(s.to_string());
+                    }
+                }
             }
         }
     }

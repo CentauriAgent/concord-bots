@@ -168,7 +168,8 @@ async fn npub_cash_claim_task(ctx: BotContext) {
     match result {
         Ok(claim) => {
             if claim.tokens.is_empty() {
-                return; // Nothing pending — normal case
+                tracing::debug!("npub.cash: no pending tokens");
+                return;
             }
             tracing::info!("npub.cash: {} token(s) to claim", claim.tokens.len());
 
