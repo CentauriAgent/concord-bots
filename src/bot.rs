@@ -107,6 +107,22 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
     tracing::info!("Bot online as {}", bot.npub());
 
+    // -----------------------------------------------------------------------
+    // Step 1b: Push profile metadata to relays (kind 0) if configured
+    // -----------------------------------------------------------------------
+    if config.bot.display_name.is_some() || config.bot.picture.is_some() || config.bot.banner.is_some() || config.bot.about.is_some() {
+        let name = config.bot.display_name.as_deref().unwrap_or("Flagship");
+        let picture = config.bot.picture.as_deref().unwrap_or("");
+        let banner = config.bot.banner.as_deref().unwrap_or("");
+        let about = config.bot.about.as_deref().unwrap_or("");
+        tracing::info!("Updating bot profile: name={}, picture={}, banner={}", name, !picture.is_empty(), !banner.is_empty());
+        if bot.update_profile(name, picture, banner, about).await {
+            tracing::info!("Profile metadata published to relays");
+        } else {
+            tracing::warn!("Failed to publish profile metadata — will retry on next restart");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Step 2: Initialize auth system
     // -------------------------------------------------------------------------

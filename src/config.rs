@@ -131,6 +131,9 @@ pub struct BotSection {
     /// Bot profile picture URL (optional).
     pub picture: Option<String>,
 
+    /// Bot profile banner URL (optional).
+    pub banner: Option<String>,
+
     /// About text for bot profile (optional).
     pub about: Option<String>,
 }

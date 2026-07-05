@@ -30,11 +30,12 @@ invite_policy = "owner"
 #   "npub1ghijkl...",
 # ]
 
-# Bot profile (optional — shown to users in Vector)
+# Bot profile (optional — shown to users in Vector, published as kind 0 to relays on startup)
 # display_name = "Keystone"
 # A short description shown on the bot's Nostr profile.
 # about = "A Concord Protocol bot built with concord-bots"
 # picture = "https://example.com/avatar.png"
+# banner = "https://example.com/banner.png"
 
 # =============================================================================
 # Authorization — owner and permission system
