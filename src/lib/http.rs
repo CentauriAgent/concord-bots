@@ -17,6 +17,11 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to build HTTP client")
 });
 
+/// Get a reference to the shared HTTP client (for custom request building).
+pub fn client() -> &'static reqwest::Client {
+    &CLIENT
+}
+
 /// Fetch a URL and parse the response as JSON.
 ///
 /// # Example

@@ -31,6 +31,9 @@ pub struct BotConfig {
     /// Git repo monitor configuration.
     #[serde(default)]
     pub git_monitor: GitMonitorSection,
+    /// npub.cash zap-receiving configuration.
+    #[serde(default)]
+    pub npub_cash: Option<NpubCashSection>,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -136,6 +139,10 @@ pub struct BotSection {
 
     /// About text for bot profile (optional).
     pub about: Option<String>,
+
+    /// Lightning address (lud16) for bot profile — enables receiving zaps (optional).
+    /// Example: "botname@npub.cash"
+    pub lud16: Option<String>,
 }
 
 // -----------------------------------------------------------------------------
@@ -522,6 +529,41 @@ fn default_max_repos() -> usize {
 
 fn default_polite_sleep_ms() -> u64 {
     500
+}
+
+// -----------------------------------------------------------------------------
+// npub.cash section
+// -----------------------------------------------------------------------------
+
+/// npub.cash configuration for receiving Lightning zaps as Cashu tokens.
+///
+/// When enabled, the bot periodically claims pending tokens from zaps sent
+/// to `<bot-npub>@npub.cash` (or a self-hosted npubcash-server).
+#[derive(Debug, Clone, Deserialize)]
+pub struct NpubCashSection {
+    /// Enable the claim task.
+    #[serde(default = "default_npub_cash_enabled")]
+    pub enabled: bool,
+
+    /// Base URL of the npub.cash service.
+    #[serde(default = "default_npub_cash_url")]
+    pub url: String,
+
+    /// How often to poll for pending tokens, in seconds.
+    #[serde(default = "default_npub_cash_interval")]
+    pub claim_interval_secs: u64,
+}
+
+fn default_npub_cash_enabled() -> bool {
+    true
+}
+
+fn default_npub_cash_url() -> String {
+    "https://npub.cash".to_string()
+}
+
+fn default_npub_cash_interval() -> u64 {
+    300 // 5 minutes
 }
 
 #[cfg(test)]

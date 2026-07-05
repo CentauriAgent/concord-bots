@@ -163,6 +163,19 @@ impl CashuWallet {
 
         Ok(amount)
     }
+
+    /// Receive a Cashu token (e.g. from a tip or npub.cash claim) into the wallet.
+    /// Returns the amount received in sats.
+    #[instrument(skip(self, encoded_token))]
+    pub async fn receive(&self, encoded_token: &str) -> Result<u64> {
+        use cdk::wallet::ReceiveOptions;
+        let amount = self
+            .wallet
+            .receive(encoded_token, ReceiveOptions::default())
+            .await
+            .map_err(|e| anyhow!("Receive failed: {:?}", e))?;
+        Ok(u64::from(amount))
+    }
 }
 
 // -----------------------------------------------------------------------------

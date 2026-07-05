@@ -36,6 +36,7 @@ invite_policy = "owner"
 # about = "A Concord Protocol bot built with concord-bots"
 # picture = "https://example.com/avatar.png"
 # banner = "https://example.com/banner.png"
+# lud16 = "<bot-npub>@npub.cash"  # Lightning address — enables receiving zaps
 
 # =============================================================================
 # Authorization — owner and permission system
@@ -98,6 +99,21 @@ invite_policy = "owner"
 #   "https://8333.space:3338" (bitcoin space)
 #   "https://stablenut.umint.cash" (test mint)
 # mint_url = "https://mint.minibits.cash/Bitcoin"
+
+# =============================================================================
+# npub.cash — receive Lightning zaps as Cashu tokens
+# =============================================================================
+#
+# When someone zaps <bot-npub>@npub.cash, npub.cash mints Cashu tokens
+# and holds them. The bot periodically claims them via NIP-98 auth
+# (signed kind 27235 Nostr event) and receives them into its Cashu wallet.
+#
+# Requires lud16 to be set in [bot] section pointing to <bot-npub>@npub.cash.
+
+[npub_cash]
+# enabled = true
+# url = "https://npub.cash"
+# claim_interval_secs = 300  # poll every 5 minutes
 
 # =============================================================================
 # Custom — any additional config for your handlers

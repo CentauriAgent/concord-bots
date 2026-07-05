@@ -55,6 +55,17 @@ pub async fn register(_bot: &VectorBot, _ctx: BotContext) -> Result<()> {
         tracing::info!("Started git monitor poller (every {}s)", interval_secs);
     }
 
+    // npub.cash claim task — sweep pending zaps into the Cashu wallet
+    if _ctx.config.bot_nsec().is_some() {
+        if let Some(ref npc) = _ctx.config.npub_cash {
+            if npc.enabled {
+                let interval_secs = npc.claim_interval_secs.max(60);
+                spawn_interval_simple(_ctx.clone(), interval_secs, npub_cash_claim_task);
+                tracing::info!("Started npub.cash claim task (every {}s)", interval_secs);
+            }
+        }
+    }
+
     // Example: Post "I'm alive!" every 5 minutes
     // Uncomment the lines below to enable:
     //
@@ -140,6 +151,55 @@ where
 /// Git monitor poll task — polls all subscriptions for new commits/releases.
 async fn git_monitor_poll_task(ctx: BotContext) {
     crate::git_monitor::poll_all(&ctx).await;
+}
+
+/// npub.cash claim task — sweep pending Cashu tokens from zaps into the wallet.
+async fn npub_cash_claim_task(ctx: BotContext) {
+    let nsec = match ctx.config.bot_nsec() {
+        Some(n) => n,
+        None => return,
+    };
+    let npc = match ctx.config.npub_cash.as_ref() {
+        Some(c) if c.enabled => c,
+        _ => return,
+    };
+
+    let result = crate::lib::npub_cash::claim(&npc.url, &nsec).await;
+    match result {
+        Ok(claim) => {
+            if claim.tokens.is_empty() {
+                return; // Nothing pending — normal case
+            }
+            tracing::info!("npub.cash: {} token(s) to claim", claim.tokens.len());
+
+            // Receive each token into the wallet
+            if let Some(ref wallet) = ctx.wallet {
+                for token_str in &claim.tokens {
+                    match wallet.receive(token_str).await {
+                        Ok(sats) => {
+                            tracing::info!("npub.cash: claimed {} sats into wallet", sats);
+
+                            // Announce in primary community channel
+                            if let Some(channel_id) = ctx.config.communities.join.first() {
+                                let channel = ctx.bot.channel(channel_id.clone());
+                                let _ = channel
+                                    .send(&format!("⚡ Received {} sats via npub.cash zap!", sats))
+                                    .await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("npub.cash: failed to receive token into wallet: {:?}", e);
+                        }
+                    }
+                }
+            } else {
+                tracing::warn!("npub.cash: tokens claimed but no wallet configured to receive them");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("npub.cash claim failed: {:?}", e);
+        }
+    }
 }
 
 #[cfg(test)]

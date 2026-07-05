@@ -8,3 +8,5 @@
 pub mod http;
 pub mod scheduler;
 pub mod vector_client;
+pub mod nip98;
+pub mod npub_cash;

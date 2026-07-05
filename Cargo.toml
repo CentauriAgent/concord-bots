@@ -34,6 +34,12 @@ bip39 = "2"
 # URL encoding for NIP-57 zap requests
 urlencoding = "2"
 
+# Nostr event signing (NIP-98 auth for npub.cash claim, kind 0 profile with lud16)
+nostr-sdk = "0.44"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
 # SQLite for community engagement system (XP, levels, giveaways, reputation)
 rusqlite = { version = "0.37", features = ["bundled"] }
 

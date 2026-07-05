@@ -110,16 +110,45 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // -----------------------------------------------------------------------
     // Step 1b: Push profile metadata to relays (kind 0) if configured
     // -----------------------------------------------------------------------
-    if config.bot.display_name.is_some() || config.bot.picture.is_some() || config.bot.banner.is_some() || config.bot.about.is_some() {
+    // The SDK's update_bot_profile() doesn't accept lud16. If lud16 is set,
+    // we publish a custom kind 0 event that includes it alongside the other
+    // fields. Otherwise we fall back to the SDK's built-in profile update.
+    let has_profile_fields = config.bot.display_name.is_some()
+        || config.bot.picture.is_some()
+        || config.bot.banner.is_some()
+        || config.bot.about.is_some();
+
+    if has_profile_fields || config.bot.lud16.is_some() {
         let name = config.bot.display_name.as_deref().unwrap_or("Flagship");
         let picture = config.bot.picture.as_deref().unwrap_or("");
         let banner = config.bot.banner.as_deref().unwrap_or("");
         let about = config.bot.about.as_deref().unwrap_or("");
-        tracing::info!("Updating bot profile: name={}, picture={}, banner={}", name, !picture.is_empty(), !banner.is_empty());
-        if bot.update_profile(name, picture, banner, about).await {
-            tracing::info!("Profile metadata published to relays");
+        let lud16 = config.bot.lud16.as_deref().unwrap_or("");
+        tracing::info!(
+            "Updating bot profile: name={}, picture={}, banner={}, lud16={}",
+            name, !picture.is_empty(), !banner.is_empty(), if lud16.is_empty() { "none" } else { lud16 }
+        );
+
+        if !lud16.is_empty() {
+            // Custom kind 0 with lud16 — sign and publish via nostr-sdk
+            match publish_profile_with_lud16(
+                nsec.as_deref(),
+                name,
+                picture,
+                banner,
+                about,
+                lud16,
+            ).await {
+                true => tracing::info!("Profile metadata (with lud16) published to relays"),
+                false => tracing::warn!("Failed to publish profile metadata with lud16 — will retry on next restart"),
+            }
         } else {
-            tracing::warn!("Failed to publish profile metadata — will retry on next restart");
+            // No lud16 — use the SDK's built-in profile update
+            if bot.update_profile(name, picture, banner, about).await {
+                tracing::info!("Profile metadata published to relays");
+            } else {
+                tracing::warn!("Failed to publish profile metadata — will retry on next restart");
+            }
         }
     }
 
@@ -294,4 +323,81 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
     tracing::info!("Shutdown signal received. Goodbye!");
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Profile publishing with lud16
+// -----------------------------------------------------------------------------
+
+/// Publish a kind 0 (Metadata) event that includes lud16 alongside the standard fields.
+///
+/// The vector_sdk's `update_profile()` doesn't accept lud16, so when a Lightning address
+/// is configured we publish a custom kind 0 event via nostr-sdk directly.
+///
+/// Returns true on success (at least one relay accepted), false on failure.
+async fn publish_profile_with_lud16(
+    nsec: Option<&str>,
+    name: &str,
+    picture: &str,
+    banner: &str,
+    about: &str,
+    lud16: &str,
+) -> bool {
+    use nostr_sdk::prelude::*;
+
+    let nsec = match nsec {
+        Some(n) => n,
+        None => {
+            tracing::warn!("Cannot publish profile with lud16 — no nsec available");
+            return false;
+        }
+    };
+
+    let keys = match Keys::parse(nsec) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!("Failed to parse nsec for profile publish: {:?}", e);
+            return false;
+        }
+    };
+
+    // Build metadata JSON
+    let mut meta = serde_json::json!({
+        "name": name,
+        "about": about,
+    });
+    if !picture.is_empty() {
+        meta["picture"] = serde_json::Value::String(picture.to_string());
+    }
+    if !banner.is_empty() {
+        meta["banner"] = serde_json::Value::String(banner.to_string());
+    }
+    if !lud16.is_empty() {
+        meta["lud16"] = serde_json::Value::String(lud16.to_string());
+    }
+
+    let event = match EventBuilder::new(Kind::Metadata, meta.to_string()).sign(&keys).await {        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("Failed to sign kind 0 event: {:?}", e);
+            return false;
+        }
+    };
+
+    // Use vector_core's shared Nostr client to send the event — this routes
+    // through the same relay pool the bot is already connected to.
+    if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
+        match client.send_event(&event).await {
+            Ok(_) => {
+                tracing::info!("Published kind 0 with lud16={} to relays", lud16);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("Failed to send kind 0 event to relays: {:?}", e);
+                false
+            }
+        }
+    } else {
+        tracing::warn!("Nostr client not available — cannot publish kind 0");
+        false
+    }
 }
