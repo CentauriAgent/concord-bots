@@ -8,3 +8,6 @@ identity.nsec
 *~
 .DS_Store
 auth_state.json
+
+# Runtime state — never commit (contains wallet seed, DBs, user data)
+/data/
