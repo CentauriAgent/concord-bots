@@ -204,12 +204,7 @@ async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str) {
         .filter(|(_, leveled_up)| *leveled_up);
 
     if let Some((new_level, true)) = leveled_up_info {
-        let short = if npub.len() > 16 {
-            format!("{}...{}", &npub[..12], &npub[npub.len() - 4..])
-        } else {
-            npub.to_string()
-        };
-        let announcement = format!("🎉 {} reached Level {}!", short, new_level);
+        let announcement = format!("🎉 nostr:{} reached Level {}!", npub, new_level);
         let _ = ctx.bot.channel(channel_id.to_string()).send(&announcement).await;
     }
 }

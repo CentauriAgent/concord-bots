@@ -529,13 +529,13 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             };
 
             let mut reply = format!(
-                "⭐ You gave +1 rep to {}! (Total: {})",
-                short_npub(&target_npub),
+                "⭐ You gave +1 rep to nostr:{}! (Total: {})",
+                target_npub,
                 total_rep
             );
 
             if leveled_up {
-                reply.push_str(&format!("\n🎉 {} reached Level {}!", short_npub(&target_npub), new_level));
+                reply.push_str(&format!("\n🎉 nostr:{} reached Level {}!", target_npub, new_level));
             }
 
             msg.reply(&reply).await?;
