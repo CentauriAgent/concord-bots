@@ -865,7 +865,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!git",      description: "Git repo monitor (add/list/remove/poll)",   feature: Some(Feature::GitMonitor), auth: AuthLevel::Public },
 
     // V2 Community Management
-    CommandMeta { name: "!community", description: "v2 community management (create/info/leave/dissolve)", feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!community", description: "v2 community management (create/info/leave/dissolve)", feature: Some(Feature::Community), auth: AuthLevel::Authorized },
     CommandMeta { name: "!invite",   description: "Create invite link or invite by npub",      feature: Some(Feature::Community), auth: AuthLevel::Authorized },
     CommandMeta { name: "!join",     description: "Join a community via invite link",           feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!members",  description: "List community members",                     feature: Some(Feature::Community), auth: AuthLevel::Public },
