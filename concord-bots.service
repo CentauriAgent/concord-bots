@@ -1,0 +1,28 @@
+[Unit]
+Description=concord-bots — Vector/Concord Protocol Bot (Flagship)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moltbot
+WorkingDirectory=/home/moltbot/projects/concord-bots
+ExecStart=/home/moltbot/projects/concord-bots/target/release/concord-bots
+Environment=RUST_LOG=info
+Environment=HOME=/home/moltbot
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Graceful shutdown
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=concord-bots
+
+[Install]
+WantedBy=default.target

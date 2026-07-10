@@ -48,4 +48,4 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 [profile.release]
 opt-level = 2
-lto = true
+lto = false
