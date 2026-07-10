@@ -67,7 +67,7 @@ fn save_warnings(warnings: &[Warning]) {
 // !leave — Leave the current community (owner only)
 // -----------------------------------------------------------------------------
 
-pub async fn leave_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
+pub async fn leave_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {

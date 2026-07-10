@@ -18,7 +18,7 @@ use vector_sdk::IncomingMessage;
 use crate::bot::BotContext;
 use crate::handlers::normalize_npub;
 use crate::community::{
-    xp_for_level, xp_in_current_level, Database,
+    xp_for_level, xp_in_current_level,
 };
 
 // -----------------------------------------------------------------------------
