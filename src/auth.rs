@@ -174,6 +174,12 @@ impl AuthManager {
         self.read().owner.clone()
     }
 
+    /// Get the owner npub as a reference (for comparison without cloning).
+    pub fn owner_npub(&self) -> Option<String> {
+        let owner = self.read().owner.clone();
+        if owner.is_empty() { None } else { Some(owner) }
+    }
+
     /// Number of authorized users (excluding owner).
     pub fn authorized_count(&self) -> usize {
         self.read().authorized.len()

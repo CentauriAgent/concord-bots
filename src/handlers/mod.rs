@@ -139,6 +139,18 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
     }
 
     // -------------------------------------------------------------------------
+    // 0b. File attachment logging
+    // --------------------------------------------------------------------------
+    if msg.is_file {
+        for att in &msg.message.attachments {
+            tracing::info!(
+                "Attachment received: {} ({} bytes, .{}) from {}",
+                att.name, att.size, att.extension, msg.chat_id
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // 1. Command dispatch — messages starting with "!"
     // -------------------------------------------------------------------------
     if text.starts_with('!') {
@@ -261,14 +273,27 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         }
 
         // A message was edited or received a reaction.
-        BotEvent::MessageUpdate { chat_id, .. } => {
-            tracing::debug!("Message update in chat {}", chat_id);
-            // Handle reaction/edit events here
+        BotEvent::MessageUpdate { chat_id, message } => {
+            tracing::debug!("Message update in chat {}: {} reactions", chat_id, message.reactions.len());
+            // Award XP for reactions on the author's message (community engagement)
+            if ctx.config.features.is_enabled(Feature::Community) && !message.reactions.is_empty() {
+                if let Some(ref npub) = message.npub {
+                    if npub != &ctx.bot.npub() {
+                        // Small XP for getting a reaction (3-5 XP)
+                        let xp = {
+                            use rand::Rng;
+                            let mut rng = rand::thread_rng();
+                            rng.gen_range(3..=5)
+                        };
+                        let _ = ctx.community_db.award_xp(npub, xp, chat_id);
+                    }
+                }
+            }
         }
 
         // A message was deleted.
         BotEvent::Delete { chat_id, message_id } => {
-            tracing::debug!("Message {} deleted in chat {}", message_id, chat_id);
+            tracing::info!("Message {} deleted in chat {}", message_id, chat_id);
         }
 
         // The bot received a community invite.
@@ -279,6 +304,14 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         // The bot was removed from a community.
         BotEvent::Removed { community_id } => {
             tracing::warn!("Bot was removed from community {}", community_id);
+            // Notify the owner via DM if auth is configured
+            if let Some(ref auth) = ctx.auth {
+                if let Some(ref owner) = auth.owner_npub() {
+                    let _ = ctx.bot.dm(owner).send(
+                        &format!("⚠️ I was removed from community {}", community_id)
+                    ).await;
+                }
+            }
         }
 
         // Typing indicator.

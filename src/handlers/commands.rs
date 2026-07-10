@@ -188,6 +188,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         "!price" | "!time" | "!roll" | "!stats" | "!weather"
         | "!remind" | "!poll" | "!translate" | "!define" | "!quote"
         | "!joke" | "!fact" | "!meme" | "!shorten"
+        | "!delete" | "!edit" | "!savefile"
             if features.utility => {
             dispatch_utility(ctx, msg, command, args).await?;
         }
@@ -478,6 +479,9 @@ async fn dispatch_utility(
         "!fact" => utility::fact_command(ctx, msg).await?,
         "!meme" => utility::meme_command(ctx, msg).await?,
         "!shorten" => utility::shorten_command(ctx, msg, args).await?,
+        "!delete" => utility::delete_command(ctx, msg, args).await?,
+        "!edit" => utility::edit_command(ctx, msg, args).await?,
+        "!savefile" => utility::savefile_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_utility called with non-utility command: {}", command),
     }
     Ok(())
@@ -815,6 +819,9 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!fact",     description: "Random fun fact",                  feature: Some(Feature::Utility), auth: AuthLevel::Public },
     CommandMeta { name: "!meme",     description: "Random meme",                      feature: Some(Feature::Utility), auth: AuthLevel::Public },
     CommandMeta { name: "!shorten",  description: "Shorten a URL",                   feature: Some(Feature::Utility), auth: AuthLevel::Public },
+    CommandMeta { name: "!delete",   description: "Delete a message by ID",             feature: Some(Feature::Utility), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!edit",     description: "Edit a message by ID",               feature: Some(Feature::Utility), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!savefile", description: "Save an attachment to disk",          feature: Some(Feature::Utility), auth: AuthLevel::Authorized },
 
     // Fun
     CommandMeta { name: "!8ball",    description: "Magic 8-ball",                     feature: Some(Feature::Fun), auth: AuthLevel::Public },
@@ -947,6 +954,7 @@ mod tests {
         assert!(help.contains("!fact"));
         assert!(help.contains("!meme"));
         assert!(help.contains("!shorten"));
+        assert!(help.contains("!delete"));
         // Fun
         assert!(help.contains("!8ball"));
         assert!(help.contains("!flip"));

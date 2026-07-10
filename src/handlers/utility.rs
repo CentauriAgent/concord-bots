@@ -9,6 +9,93 @@ use vector_sdk::IncomingMessage;
 use crate::bot::BotContext;
 use crate::lib::http;
 
+// -----------------------------------------------------------------------------
+// !delete <msg_id> — Delete a message (bot's own or MANAGE_MESSAGES in v2)
+// -----------------------------------------------------------------------------
+
+pub async fn delete_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let msg_id = args.trim();
+    if msg_id.is_empty() {
+        msg.reply("Usage: !delete <message_id>\n\nDeletes a message. You can only delete your own messages, or messages in communities where you have MANAGE_MESSAGES capability.").await?;
+        return Ok(());
+    }
+
+    let channel = msg.channel();
+    match channel.delete(msg_id).await {
+        Ok(()) => { msg.reply("🗑️ Message deleted.").await?; }
+        Err(e) => {
+            let err = format!("{:?}", e).to_lowercase();
+            if err.contains("permission") || err.contains("manage") {
+                msg.reply("⚠️ I don't have permission to delete that message.").await?;
+            } else {
+                msg.reply(&format!("⚠️ Delete failed: {}", e)).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !edit <msg_id> <text> — Edit a message (bot's own only)
+// -----------------------------------------------------------------------------
+
+pub async fn edit_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
+    if parts.len() < 2 {
+        msg.reply("Usage: !edit <message_id> <new text>").await?;
+        return Ok(());
+    }
+    let msg_id = parts[0].trim();
+    let new_text = parts[1].trim();
+
+    if msg_id.is_empty() || new_text.is_empty() {
+        msg.reply("Usage: !edit <message_id> <new text>").await?;
+        return Ok(());
+    }
+
+    let channel = msg.channel();
+    match channel.edit(msg_id, new_text).await {
+        Ok(()) => { msg.reply("✏️ Message edited.").await?; }
+        Err(e) => { msg.reply(&format!("⚠️ Edit failed: {}", e)).await?; }
+    }
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// !savefile — Save an attachment to disk
+// -----------------------------------------------------------------------------
+
+pub async fn savefile_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
+    if !msg.is_file {
+        msg.reply("⚠️ This command works on messages with file attachments. Reply to a file message with !savefile.").await?;
+        return Ok(());
+    }
+
+    let download_dir = std::path::PathBuf::from("./data/downloads");
+    if let Err(e) = std::fs::create_dir_all(&download_dir) {
+        msg.reply(&format!("⚠️ Failed to create download dir: {}", e)).await?;
+        return Ok(());
+    }
+
+    for att in &msg.message.attachments {
+        let filename = if att.name.is_empty() {
+            format!("{}.{}", att.id, att.extension)
+        } else {
+            att.name.clone()
+        };
+
+        match ctx.bot.save_attachment(att, download_dir.join(&filename)).await {
+            Ok(path) => {
+                msg.reply(&format!("💾 Saved {} ({} bytes) to {}", filename, att.size, path.display())).await?;
+            }
+            Err(e) => {
+                msg.reply(&format!("⚠️ Failed to save {}: {}", filename, e)).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Track bot start time for uptime stats.
 pub static START_TIME: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
 
