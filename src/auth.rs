@@ -258,6 +258,25 @@ impl AuthManager {
 }
 
 // -----------------------------------------------------------------------------
+// v2 Community Capability Helpers
+// -----------------------------------------------------------------------------
+
+/// Check if the bot has a specific capability in the current community.
+/// Common capabilities: "manage_roles", "manage_channels", "kick", "ban", "create_invite"
+pub async fn bot_has_capability(msg: &vector_sdk::IncomingMessage, capability: &str) -> bool {
+    match msg.community() {
+        Some(community) => match community.capabilities() {
+            Ok(caps) => {
+                let caps_str = caps.to_string();
+                caps_str.contains(capability)
+            }
+            Err(_) => false,
+        },
+        None => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 
