@@ -32,6 +32,21 @@ cp config/bot.toml.example config/bot.toml
 cargo run --release
 ```
 
+## Concord v2 Features
+
+concord-bots v2.0 supports the **Concord v2 protocol** via vector_sdk 0.3.1:
+
+- **v2 Communities** — Create, join, and manage communities on the modern Concord protocol
+- **Permission-Aware Moderation** — Kick/ban enforce v2 outranking; bans trigger automatic rekeys
+- **Community Management** — `!community create/info/leave/dissolve`, `!invite`, `!join`, `!members`, `!channels`, `!roles`, `!caps`
+- **Message Operations** — Delete and edit messages (`!delete`, `!edit`)
+- **File Handling** — Send files, save attachments (`!savefile`)
+- **Enhanced Events** — Reaction tracking (XP for reactions), removal notifications
+- **Profile Management** — Clean SDK profile publishing with lud16 support
+
+The bot works in both v1 and v2 communities simultaneously — the SDK handles protocol differences transparently.
+
+
 ## Project structure
 
 ```

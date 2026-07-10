@@ -174,6 +174,12 @@ impl AuthManager {
         self.read().owner.clone()
     }
 
+    /// Get the owner npub as a reference (for comparison without cloning).
+    pub fn owner_npub(&self) -> Option<String> {
+        let owner = self.read().owner.clone();
+        if owner.is_empty() { None } else { Some(owner) }
+    }
+
     /// Number of authorized users (excluding owner).
     pub fn authorized_count(&self) -> usize {
         self.read().authorized.len()
@@ -254,6 +260,25 @@ impl AuthManager {
 
     fn write(&self) -> std::sync::RwLockWriteGuard<'_, AuthManagerInner> {
         self.inner.write().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// v2 Community Capability Helpers
+// -----------------------------------------------------------------------------
+
+/// Check if the bot has a specific capability in the current community.
+/// Common capabilities: "manage_roles", "manage_channels", "kick", "ban", "create_invite"
+pub async fn bot_has_capability(msg: &vector_sdk::IncomingMessage, capability: &str) -> bool {
+    match msg.community() {
+        Some(community) => match community.capabilities() {
+            Ok(caps) => {
+                let caps_str = caps.to_string();
+                caps_str.contains(capability)
+            }
+            Err(_) => false,
+        },
+        None => false,
     }
 }
 

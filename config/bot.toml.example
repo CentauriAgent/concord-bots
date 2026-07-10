@@ -134,3 +134,21 @@ invite_policy = "owner"
 # model = "gpt-4o-mini"          # only used for OpenAI
 # system_prompt = "You are a helpful Vector community bot."
 # api_key = "sk-..."             # or set AI_API_KEY env var
+
+# =============================================================================
+# V2 Community Management — Concord v2 protocol features
+# =============================================================================
+#
+# Controls automatic community creation and joining on startup.
+
+# [v2]
+# Automatically create a v2 community on startup if the bot isn't in any.
+# auto_create = false
+
+# Name for the auto-created community.
+# community_name = "My Bot Community"
+
+# Invite links to join on startup.
+# join_on_start = [
+#   "https://vector.app/invite/...",
+# ]

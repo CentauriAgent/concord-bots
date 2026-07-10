@@ -185,7 +185,7 @@ impl Database {
     /// Award XP to `npub`. Creates the user row if it doesn't exist.
     /// Returns `(new_level, leveled_up)`.
     pub fn award_xp(&self, npub: &str, amount: i64, channel_id: &str) -> Result<(i64, bool)> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let ts = now();
 
         // Ensure user exists
@@ -254,7 +254,7 @@ impl Database {
 
     /// Increment message count for a user.
     pub fn increment_messages(&self, npub: &str) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let ts = now();
         conn.execute(
             "INSERT OR IGNORE INTO users (npub, first_seen) VALUES (?1, ?2)",
@@ -269,7 +269,7 @@ impl Database {
 
     /// Add sats tipped to user's record.
     pub fn add_sats_tipped(&self, npub: &str, sats: i64) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let ts = now();
         conn.execute(
             "INSERT OR IGNORE INTO users (npub, first_seen) VALUES (?1, ?2)",
@@ -284,7 +284,7 @@ impl Database {
 
     /// Add sats zapped to user's record.
     pub fn add_sats_zapped(&self, npub: &str, sats: i64) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let ts = now();
         conn.execute(
             "INSERT OR IGNORE INTO users (npub, first_seen) VALUES (?1, ?2)",
@@ -381,7 +381,7 @@ impl Database {
 
     /// End a giveaway (mark inactive). Returns the giveaway row.
     pub fn end_giveaway(&self, id: &str) -> Result<Option<Giveaway>> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let giveaway = self.get_giveaway_inner(&conn, id)?;
         conn.execute(
             "UPDATE giveaways SET active = 0 WHERE id = ?1",
@@ -534,7 +534,7 @@ impl Database {
     /// Give +1 rep from `from` to `to`. Returns Ok(()) if successful.
     /// Returns Err if on cooldown (already gave rep to this target within 24h).
     pub fn give_rep(&self, from: &str, to: &str) -> Result<bool> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let ts = now();
 
         // Ensure users exist
@@ -619,7 +619,7 @@ impl Database {
         enabled: bool,
         updated_by: &str,
     ) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO channel_state (channel_id, enabled, updated_at, updated_by) \
              VALUES (?1, ?2, ?3, ?4) \
@@ -632,7 +632,7 @@ impl Database {
     /// Mark a channel as disabled. Used when the bot joins a new community
     /// and we want all channels to start in the opt-in state.
     pub fn disable_channel(&self, channel_id: &str) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO channel_state (channel_id, enabled, updated_at, updated_by) \
              VALUES (?1, 0, ?2, 'system')",

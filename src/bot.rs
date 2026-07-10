@@ -272,6 +272,40 @@ pub async fn run(config: BotConfig) -> Result<()> {
     handlers::register(&bot, ctx.clone()).await?;
 
     // -------------------------------------------------------------------------
+    // Step 4b: v2 community bootstrap
+    // -------------------------------------------------------------------------
+    {
+        let v2_config = &ctx.config.v2;
+
+        if v2_config.auto_create {
+            // Check if we're in any communities already
+            let existing = bot.communities().await;
+            if existing.is_empty() {
+                let name = v2_config.community_name.as_deref().unwrap_or("Bot Community");
+                match bot.core().create_community_v2(name).await {
+                    Ok(summary) => {
+                        let id = summary
+                            .get("community_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        tracing::info!("Auto-created v2 community: {}", id);
+                    }
+                    Err(e) => tracing::error!("Failed to auto-create community: {:?}", e),
+                }
+            } else {
+                tracing::info!("Already in {} community/communities — skipping auto-create", existing.len());
+            }
+        }
+
+        for link in &v2_config.join_on_start {
+            match bot.core().join_community(link).await {
+                Ok(summary) => tracing::info!("Joined community: {:?}", summary),
+                Err(e) => tracing::error!("Failed to join {}: {:?}", link, e),
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Step 5: Event loop (handles BOTH messages AND member joins)
     // -------------------------------------------------------------------------
     // Use on_event — it's a superset of on_message. Messages arrive as
@@ -331,10 +365,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
 /// Publish a kind 0 (Metadata) event that includes lud16 alongside the standard fields.
 ///
-/// The vector_sdk's `update_profile()` doesn't accept lud16, so when a Lightning address
-/// is configured we publish a custom kind 0 event via nostr-sdk directly.
-///
-/// Returns true on success (at least one relay accepted), false on failure.
+/// Publish a kind 0 event with lud16 (SDK doesn't accept lud16 yet).
 async fn publish_profile_with_lud16(
     nsec: Option<&str>,
     name: &str,
@@ -347,57 +378,31 @@ async fn publish_profile_with_lud16(
 
     let nsec = match nsec {
         Some(n) => n,
-        None => {
-            tracing::warn!("Cannot publish profile with lud16 — no nsec available");
-            return false;
-        }
+        None => return false,
     };
 
     let keys = match Keys::parse(nsec) {
         Ok(k) => k,
-        Err(e) => {
-            tracing::warn!("Failed to parse nsec for profile publish: {:?}", e);
-            return false;
-        }
+        Err(e) => { tracing::warn!("Failed to parse nsec: {:?}", e); return false; }
     };
 
-    // Build metadata JSON
-    let mut meta = serde_json::json!({
-        "name": name,
-        "about": about,
-    });
-    if !picture.is_empty() {
-        meta["picture"] = serde_json::Value::String(picture.to_string());
-    }
-    if !banner.is_empty() {
-        meta["banner"] = serde_json::Value::String(banner.to_string());
-    }
-    if !lud16.is_empty() {
-        meta["lud16"] = serde_json::Value::String(lud16.to_string());
-    }
+    let mut meta = serde_json::json!({ "name": name, "about": about });
+    if !picture.is_empty() { meta["picture"] = serde_json::Value::String(picture.to_string()); }
+    if !banner.is_empty() { meta["banner"] = serde_json::Value::String(banner.to_string()); }
+    if !lud16.is_empty() { meta["lud16"] = serde_json::Value::String(lud16.to_string()); }
 
-    let event = match EventBuilder::new(Kind::Metadata, meta.to_string()).sign(&keys).await {        Ok(e) => e,
-        Err(e) => {
-            tracing::warn!("Failed to sign kind 0 event: {:?}", e);
-            return false;
-        }
+    let event = match EventBuilder::new(Kind::Metadata, meta.to_string()).sign(&keys).await {
+        Ok(e) => e,
+        Err(e) => { tracing::warn!("Failed to sign kind 0: {:?}", e); return false; }
     };
 
-    // Use vector_core's shared Nostr client to send the event — this routes
-    // through the same relay pool the bot is already connected to.
     if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
         match client.send_event(&event).await {
-            Ok(_) => {
-                tracing::info!("Published kind 0 with lud16={} to relays", lud16);
-                true
-            }
-            Err(e) => {
-                tracing::warn!("Failed to send kind 0 event to relays: {:?}", e);
-                false
-            }
+            Ok(_) => { tracing::info!("Published kind 0 with lud16={}", lud16); true }
+            Err(e) => { tracing::warn!("Failed to send kind 0: {:?}", e); false }
         }
     } else {
-        tracing::warn!("Nostr client not available — cannot publish kind 0");
+        tracing::warn!("Nostr client not available");
         false
     }
 }

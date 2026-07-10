@@ -210,7 +210,7 @@ fn load_or_create_seed(seed_path: &Path) -> Result<[u8; 64]> {
     // Generate new mnemonic
     tracing::info!("Generating new wallet seed at {}", seed_path.display());
     let mnemonic = bip39::Mnemonic::generate(24)
-        .map_err(|e| anyhow!("Failed to generate mnemonic: {:?}", e))?;;
+        .map_err(|e| anyhow!("Failed to generate mnemonic: {:?}", e))?;
 
     // Derive the 64-byte seed
     let seed = mnemonic.to_seed_normalized("");

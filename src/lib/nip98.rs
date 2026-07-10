@@ -32,7 +32,7 @@ pub async fn build_auth_header(
         .tags(tags)
         .sign(&keys)
         .await
-        .context("Failed to sign NIP-98 event")?;;
+        .context("Failed to sign NIP-98 event")?;
 
     let json = serde_json::to_string(&event).context("Failed to serialize NIP-98 event")?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(json);
