@@ -427,6 +427,15 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         }
 
         // =====================================================================
+        // V2 COMMUNITY MANAGEMENT (gated by features.community)
+        // =====================================================================
+
+        "!community" | "!invite" | "!join" | "!members" | "!channels" | "!roles" | "!caps"
+            if features.community => {
+            dispatch_v2_community(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
         // UNKNOWN COMMAND — silently ignore
         // =====================================================================
 
@@ -561,6 +570,31 @@ async fn dispatch_community(
         "!giveaway" => community_cmds::giveaway_command(ctx, msg, args).await?,
         "!rep" => community_cmds::rep_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_community called with non-community command: {}", command),
+    }
+    Ok(())
+}
+
+/// Dispatch v2 community management commands.
+async fn dispatch_v2_community(
+    ctx: &BotContext,
+    msg: &IncomingMessage,
+    command: &str,
+    args: &str,
+) -> Result<()> {
+    match command {
+        "!community" => community_cmds::v2_community_command(ctx, msg, args).await?,
+        "!invite" => community_cmds::v2_invite_command(ctx, msg, args).await?,
+        "!join" => {
+            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
+                return Ok(());
+            }
+            community_cmds::v2_join_command(ctx, msg, args).await?;
+        }
+        "!members" => community_cmds::v2_members_command(ctx, msg).await?,
+        "!channels" => community_cmds::v2_channels_command(ctx, msg).await?,
+        "!roles" => community_cmds::v2_roles_command(ctx, msg).await?,
+        "!caps" => community_cmds::v2_caps_command(ctx, msg).await?,
+        _ => unreachable!("dispatch_v2_community called with unknown command: {}", command),
     }
     Ok(())
 }
@@ -822,6 +856,15 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
 
     // Git Monitor
     CommandMeta { name: "!git",      description: "Git repo monitor (add/list/remove/poll)",   feature: Some(Feature::GitMonitor), auth: AuthLevel::Public },
+
+    // V2 Community Management
+    CommandMeta { name: "!community", description: "v2 community management (create/info/leave/dissolve)", feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!invite",   description: "Create invite link or invite by npub",      feature: Some(Feature::Community), auth: AuthLevel::Authorized },
+    CommandMeta { name: "!join",     description: "Join a community via invite link",           feature: Some(Feature::Community), auth: AuthLevel::Owner },
+    CommandMeta { name: "!members",  description: "List community members",                     feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!channels", description: "List community channels",                    feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!roles",    description: "Show community roles",                       feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!caps",     description: "Show community capabilities",                 feature: Some(Feature::Community), auth: AuthLevel::Public },
 ];
 
 // =============================================================================

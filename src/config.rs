@@ -34,6 +34,9 @@ pub struct BotConfig {
     /// npub.cash zap-receiving configuration.
     #[serde(default)]
     pub npub_cash: Option<NpubCashSection>,
+    /// Concord v2 community management settings.
+    #[serde(default)]
+    pub v2: V2Section,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -564,6 +567,27 @@ fn default_npub_cash_url() -> String {
 
 fn default_npub_cash_interval() -> u64 {
     300 // 5 minutes
+}
+
+// -----------------------------------------------------------------------------
+// V2 Community Management section
+// -----------------------------------------------------------------------------
+
+/// Concord v2 community management configuration.
+///
+/// Controls automatic community creation and joining on startup.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct V2Section {
+    /// Automatically create a v2 community on startup if the bot isn't in any.
+    #[serde(default)]
+    pub auto_create: bool,
+
+    /// Name for the auto-created community (used when `auto_create = true`).
+    pub community_name: Option<String>,
+
+    /// Invite links to join on startup.
+    #[serde(default)]
+    pub join_on_start: Vec<String>,
 }
 
 #[cfg(test)]

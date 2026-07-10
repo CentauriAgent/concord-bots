@@ -272,6 +272,40 @@ pub async fn run(config: BotConfig) -> Result<()> {
     handlers::register(&bot, ctx.clone()).await?;
 
     // -------------------------------------------------------------------------
+    // Step 4b: v2 community bootstrap
+    // -------------------------------------------------------------------------
+    {
+        let v2_config = &ctx.config.v2;
+
+        if v2_config.auto_create {
+            // Check if we're in any communities already
+            let existing = bot.communities().await;
+            if existing.is_empty() {
+                let name = v2_config.community_name.as_deref().unwrap_or("Bot Community");
+                match bot.core().create_community_v2(name).await {
+                    Ok(summary) => {
+                        let id = summary
+                            .get("community_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        tracing::info!("Auto-created v2 community: {}", id);
+                    }
+                    Err(e) => tracing::error!("Failed to auto-create community: {:?}", e),
+                }
+            } else {
+                tracing::info!("Already in {} community/communities — skipping auto-create", existing.len());
+            }
+        }
+
+        for link in &v2_config.join_on_start {
+            match bot.core().join_community(link).await {
+                Ok(summary) => tracing::info!("Joined community: {:?}", summary),
+                Err(e) => tracing::error!("Failed to join {}: {:?}", link, e),
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Step 5: Event loop (handles BOTH messages AND member joins)
     // -------------------------------------------------------------------------
     // Use on_event — it's a superset of on_message. Messages arrive as

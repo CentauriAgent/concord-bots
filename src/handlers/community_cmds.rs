@@ -15,6 +15,7 @@ use anyhow::Result;
 use std::time::Duration;
 use vector_sdk::IncomingMessage;
 
+use crate::auth::AuthLevel;
 use crate::bot::BotContext;
 use crate::handlers::normalize_npub;
 use crate::community::{
@@ -549,6 +550,389 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Err(e) => {
             tracing::warn!("Rep failed: {}", e);
             msg.reply("⚠️ Could not give reputation right now.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// v2 Community Management Commands
+// -----------------------------------------------------------------------------
+
+/// Format a serde_json::Value for display, truncating if too long.
+fn format_json_value(val: &serde_json::Value, max_len: usize) -> String {
+    let formatted = if val.is_object() || val.is_array() {
+        serde_json::to_string_pretty(val).unwrap_or_else(|_| val.to_string())
+    } else {
+        val.to_string()
+    };
+    if formatted.len() > max_len {
+        format!("{}...", &formatted[..max_len.saturating_sub(3)])
+    } else {
+        formatted
+    }
+}
+
+/// !community create <name> | info | leave | dissolve
+pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
+    let sub = parts.first().copied().unwrap_or("");
+    let rest = parts.get(1).copied().unwrap_or("");
+
+    match sub {
+        "create" => {
+            // Owner only
+            if let Some(ref auth) = ctx.auth {
+                let npub = msg.message.npub.clone().unwrap_or_default();
+                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                    msg.reply("⛔ Owner only.").await?;
+                    return Ok(());
+                }
+            }
+
+            let name = rest.trim();
+            if name.is_empty() {
+                msg.reply("Usage: !community create <name>").await?;
+                return Ok(());
+            }
+
+            match ctx.bot.core().create_community_v2(name).await {
+                Ok(summary) => {
+                    let id = summary
+                        .get("community_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    msg.reply(&format!("✅ Created v2 community: {}\n🆔 ID: {}", name, id)).await?;
+                    tracing::info!("Created v2 community '{}' with ID {}", name, id);
+                }
+                Err(e) => {
+                    msg.reply(&format!("⚠️ Failed to create community: {}", e)).await?;
+                    tracing::error!("Failed to create v2 community: {:?}", e);
+                }
+            }
+        }
+
+        "info" => {
+            let community = match msg.community() {
+                Some(c) => c,
+                None => {
+                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    return Ok(());
+                }
+            };
+
+            let id = community.id();
+            let members = community.members().await;
+            let caps = community.capabilities().ok();
+            let roles = community.roles().ok();
+
+            let mut info = format!("📊 **Community Info**\n🆔 ID: {}\n👥 Members: {}", id, members.len());
+
+            // Try to get channels from list_communities
+            let communities_list = ctx.bot.core().list_communities().await;
+            for comm in &communities_list {
+                if comm.get("community_id").and_then(|v| v.as_str()) == Some(id) {
+                    if let Some(version) = comm.get("version").and_then(|v| v.as_str()) {
+                        info.push_str(&format!("\n🔄 Protocol: v{}", version));
+                    }
+                    if let Some(channels) = comm.get("channels").and_then(|v| v.as_array()) {
+                        info.push_str(&format!("\n📝 Channels: {}", channels.len()));
+                        for ch in channels.iter().take(5) {
+                            if let Some(name) = ch.get("name").and_then(|v| v.as_str()) {
+                                info.push_str(&format!("\n   • #{}", name));
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if let Some(ref caps) = caps {
+                info.push_str(&format!("\n⚡ Capabilities: {}", format_json_value(caps, 200)));
+            }
+            if let Some(ref roles) = roles {
+                info.push_str(&format!("\n🎭 Roles: {}", format_json_value(roles, 200)));
+            }
+
+            msg.reply(&info).await?;
+        }
+
+        "leave" => {
+            // Owner only
+            if let Some(ref auth) = ctx.auth {
+                let npub = msg.message.npub.clone().unwrap_or_default();
+                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                    msg.reply("⛔ Owner only.").await?;
+                    return Ok(());
+                }
+            }
+
+            let community = match msg.community() {
+                Some(c) => c,
+                None => {
+                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    return Ok(());
+                }
+            };
+
+            let id = community.id().to_string();
+            match community.leave().await {
+                Ok(()) => {
+                    msg.reply(&format!("👋 Left community {}", id)).await?;
+                    tracing::info!("Left community {}", id);
+                }
+                Err(e) => {
+                    msg.reply(&format!("⚠️ Failed to leave community: {}", e)).await?;
+                }
+            }
+        }
+
+        "dissolve" => {
+            // Owner only — irreversible!
+            if let Some(ref auth) = ctx.auth {
+                let npub = msg.message.npub.clone().unwrap_or_default();
+                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                    msg.reply("⛔ Owner only.").await?;
+                    return Ok(());
+                }
+            }
+
+            let community = match msg.community() {
+                Some(c) => c,
+                None => {
+                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    return Ok(());
+                }
+            };
+
+            let id = community.id().to_string();
+            match community.dissolve().await {
+                Ok(()) => {
+                    msg.reply(&format!("💀 Community {} has been dissolved. This is irreversible!", id)).await?;
+                    tracing::warn!("Dissolved community {}", id);
+                }
+                Err(e) => {
+                    msg.reply(&format!("⚠️ Failed to dissolve community: {}", e)).await?;
+                }
+            }
+        }
+
+        _ => {
+            msg.reply(
+                "Usage: !community <create|info|leave|dissolve>\n\
+                 • create <name> — Create a new v2 community (Owner)\n\
+                 • info — Show community details\n\
+                 • leave — Leave this community (Owner)\n\
+                 • dissolve — Permanently dissolve (Owner, irreversible!)",
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// !invite [npub] — Create invite link or invite by npub
+pub async fn v2_invite_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    // Authorized+ check
+    if let Some(ref auth) = ctx.auth {
+        let npub = msg.message.npub.clone().unwrap_or_default();
+        if !auth.has_permission(&npub, AuthLevel::Authorized) {
+            msg.reply("⛔ Not authorized. Ask the owner to run !add <your-npub>").await?;
+            return Ok(());
+        }
+    }
+
+    let community = match msg.community() {
+        Some(c) => c,
+        None => {
+            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+
+    let target = args.trim();
+
+    if target.is_empty() {
+        // Create a shareable invite link
+        match community.create_invite().await {
+            Ok(link) => {
+                msg.reply(&format!("🔗 Invite link: {}", link)).await?;
+                tracing::info!("Created invite link for community {}", community.id());
+            }
+            Err(e) => {
+                msg.reply(&format!("⚠️ Failed to create invite: {}", e)).await?;
+            }
+        }
+    } else {
+        // Direct invite by npub
+        let npub = normalize_npub(target);
+        if npub.is_empty() || !npub.starts_with("npub1") {
+            msg.reply("⚠️ Invalid npub. Usage: !invite <npub1...>").await?;
+            return Ok(());
+        }
+
+        match community.invite(&npub).await {
+            Ok(()) => {
+                msg.reply(&format!("✅ Invited {} to this community.", npub)).await?;
+                tracing::info!("Invited {} to community {}", npub, community.id());
+            }
+            Err(e) => {
+                msg.reply(&format!("⚠️ Failed to invite {}: {}", npub, e)).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// !join <invite_link> — Join a community via invite link (Owner only)
+pub async fn v2_join_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let link = args.trim();
+
+    if link.is_empty() {
+        msg.reply("Usage: !join <invite_link>").await?;
+        return Ok(());
+    }
+
+    match ctx.bot.core().join_community(link).await {
+        Ok(summary) => {
+            let id = summary
+                .get("community_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            msg.reply(&format!("✅ Joined community: {}", id)).await?;
+            tracing::info!("Joined community via invite: {:?}", summary);
+        }
+        Err(e) => {
+            msg.reply(&format!("⚠️ Failed to join community: {}", e)).await?;
+            tracing::error!("Failed to join community via {}: {:?}", link, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// !members — List community members
+pub async fn v2_members_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let community = match msg.community() {
+        Some(c) => c,
+        None => {
+            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+
+    let members = community.members().await;
+
+    if members.is_empty() {
+        msg.reply("📦 No members found.").await?;
+        return Ok(());
+    }
+
+    let mut lines = vec![format!("👥 **Members** ({})", members.len())];
+    for member in members.iter().take(50) {
+        let npub = member.npub();
+        lines.push(format!("  • {}", short_npub(npub)));
+    }
+
+    if members.len() > 50 {
+        lines.push(format!("  ... and {} more", members.len() - 50));
+    }
+
+    msg.reply(&lines.join("\n")).await?;
+    Ok(())
+}
+
+/// !channels — List community channels
+pub async fn v2_channels_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let communities_list = ctx.bot.core().list_communities().await;
+
+    if communities_list.is_empty() {
+        msg.reply("📦 No communities found.").await?;
+        return Ok(());
+    }
+
+    // If in a community context, show just that community's channels
+    let target_id = msg.community().map(|c| c.id().to_string());
+
+    let mut lines = vec!["📝 **Channels**".to_string()];
+
+    for comm in &communities_list {
+        let cid = comm
+            .get("community_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+
+        // If we're in a community, only show that one
+        if let Some(ref tid) = target_id {
+            if cid != tid {
+                continue;
+            }
+        }
+
+        let name = comm
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unnamed");
+        lines.push(format!("🏘️ {} ({})", name, cid));
+
+        if let Some(channels) = comm.get("channels").and_then(|v| v.as_array()) {
+            for ch in channels {
+                let ch_name = ch.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let ch_id = ch.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                lines.push(format!("  • #{} ({})", ch_name, ch_id));
+            }
+        }
+    }
+
+    if lines.len() == 1 {
+        lines.push("No channels found.".to_string());
+    }
+
+    msg.reply(&lines.join("\n")).await?;
+    Ok(())
+}
+
+/// !roles — Show community roles
+pub async fn v2_roles_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let community = match msg.community() {
+        Some(c) => c,
+        None => {
+            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+
+    match community.roles() {
+        Ok(roles) => {
+            msg.reply(&format!("🎭 **Roles**\n{}", format_json_value(&roles, 500))).await?;
+        }
+        Err(e) => {
+            msg.reply(&format!("⚠️ Failed to retrieve roles: {}", e)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// !caps — Show community capabilities
+pub async fn v2_caps_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+    let community = match msg.community() {
+        Some(c) => c,
+        None => {
+            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+
+    match community.capabilities() {
+        Ok(caps) => {
+            msg.reply(&format!("⚡ **Capabilities**\n{}", format_json_value(&caps, 500))).await?;
+        }
+        Err(e) => {
+            msg.reply(&format!("⚠️ Failed to retrieve capabilities: {}", e)).await?;
         }
     }
 
