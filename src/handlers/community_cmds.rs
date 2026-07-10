@@ -585,7 +585,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             // Owner only
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
-                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
                     msg.reply("⛔ Owner only.").await?;
                     return Ok(());
                 }
@@ -662,7 +662,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             // Owner only
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
-                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
                     msg.reply("⛔ Owner only.").await?;
                     return Ok(());
                 }
@@ -692,7 +692,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             // Owner only — irreversible!
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
-                if !auth.has_permission(&npub, AuthLevel::Owner) {
+                if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
                     msg.reply("⛔ Owner only.").await?;
                     return Ok(());
                 }
@@ -738,7 +738,7 @@ pub async fn v2_invite_command(ctx: &BotContext, msg: &IncomingMessage, args: &s
     // Authorized+ check
     if let Some(ref auth) = ctx.auth {
         let npub = msg.message.npub.clone().unwrap_or_default();
-        if !auth.has_permission(&npub, AuthLevel::Authorized) {
+        if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Authorized) {
             msg.reply("⛔ Not authorized. Ask the owner to run !add <your-npub>").await?;
             return Ok(());
         }
@@ -855,7 +855,7 @@ pub async fn v2_channels_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
     }
 
     // If in a community context, show just that community's channels
-    let target_id = msg.community().map(|c| c.id().to_string());
+    let target_id: Option<String> = msg.community().map(|c| c.id().to_string());
 
     let mut lines = vec!["📝 **Channels**".to_string()];
 

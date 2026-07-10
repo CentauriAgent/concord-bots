@@ -45,14 +45,21 @@ fn sender_npub(msg: &IncomingMessage) -> String {
 }
 
 /// Check if the sender meets the required auth level.
+/// Extract community_id from a message (for per-community auth scoping).
+/// Returns None for DMs.
+fn community_id_from_msg(msg: &IncomingMessage) -> Option<String> {
+    msg.community().map(|c| c.id().to_string())
+}
+
 async fn require_auth(ctx: &BotContext, msg: &IncomingMessage, level: AuthLevel) -> Result<bool> {
     let Some(ref auth) = ctx.auth else {
         return Ok(true); // Auth not configured — allow all
     };
 
     let npub = sender_npub(msg);
-    tracing::info!("Auth check for npub={} (empty={}) level={:?}", npub, npub.is_empty(), level);
-    if auth.has_permission(&npub, level) {
+    let cid = community_id_from_msg(msg);
+    tracing::info!("Auth check for npub={} community={:?} level={:?}", npub, cid, level);
+    if auth.has_permission(&npub, cid.as_deref(), level) {
         return Ok(true);
     }
 
@@ -607,13 +614,15 @@ async fn auth_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         return Ok(());
     }
 
-    let level = auth.check(&npub);
+    let cid = community_id_from_msg(msg);
+    let level = auth.check(&npub, cid.as_deref());
+    let scope = if cid.is_some() { "this community" } else { "DMs (global only)" };
     let status_text = match level {
         AuthLevel::Owner => format!("👑 You are the **owner**.\nnpub: {}", npub),
-        AuthLevel::Authorized => format!("✅ You are **authorized**.\nnpub: {}", npub),
+        AuthLevel::Authorized => format!("✅ You are **authorized** in {}.\nnpub: {}", scope, npub),
         AuthLevel::Public => format!(
-            "❌ You are **not authorized**.\nnpub: {}\nAsk the owner to run: !add {}",
-            npub, npub
+            "❌ You are **not authorized** in {}.\nnpub: {}\nAsk the owner to run: !add {}",
+            scope, npub, npub
         ),
     };
 
@@ -627,13 +636,17 @@ async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Res
         return Ok(());
     };
 
-    let npub = normalize_npub(args);
-    if npub.is_empty() {
-        msg.reply("Usage: !add <npub>\nExample: !add nostr:npub1abc...  OR  !add npub1abc...").await?;
+    // Parse: !add <npub> [global]
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    if parts.is_empty() {
+        msg.reply("Usage: !add <npub> [global]\n\nAdds user to this community. Use 'global' to authorize in all communities.").await?;
         return Ok(());
     }
 
-    if !npub.starts_with("npub1") {
+    let npub = normalize_npub(parts[0]);
+    let as_global = parts.get(1).map(|s| *s == "global").unwrap_or(false);
+
+    if npub.is_empty() || !npub.starts_with("npub1") {
         msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
@@ -643,14 +656,17 @@ async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Res
         return Ok(());
     }
 
-    if auth.is_authorized(&npub) {
-        msg.reply(&format!("ℹ️ {} is already authorized.", npub)).await?;
+    let cid = if as_global { None } else { community_id_from_msg(msg) };
+    let scope_label = if as_global { "globally" } else { "in this community" };
+
+    if auth.is_authorized(&npub, cid.as_deref()) {
+        msg.reply(&format!("ℹ️ {} is already authorized {}.", npub, scope_label)).await?;
         return Ok(());
     }
 
-    auth.add(&npub);
-    msg.reply(&format!("✅ Added {} to authorized users.", npub)).await?;
-    tracing::info!("Authorized user added: {}", npub);
+    auth.add(&npub, cid.as_deref());
+    msg.reply(&format!("✅ Added {} to authorized users {}.", npub, scope_label)).await?;
+    tracing::info!("Authorized user added: {} scope={:?}", npub, cid);
     Ok(())
 }
 
@@ -660,9 +676,17 @@ async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> 
         return Ok(());
     };
 
-    let npub = normalize_npub(args);
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    if parts.is_empty() {
+        msg.reply("Usage: !remove <npub> [global]").await?;
+        return Ok(());
+    }
+
+    let npub = normalize_npub(parts[0]);
+    let from_global = parts.get(1).map(|s| *s == "global").unwrap_or(false);
+
     if npub.is_empty() {
-        msg.reply("Usage: !remove <npub>\nExample: !remove nostr:npub1abc...  OR  !remove npub1abc...").await?;
+        msg.reply("Usage: !remove <npub>").await?;
         return Ok(());
     }
 
@@ -671,14 +695,17 @@ async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> 
         return Ok(());
     }
 
-    if !auth.is_authorized(&npub) {
-        msg.reply(&format!("ℹ️ {} is not in the authorized list.", npub)).await?;
+    let cid = if from_global { None } else { community_id_from_msg(msg) };
+    let scope_label = if from_global { "global" } else { "this community" };
+
+    if !auth.is_authorized(&npub, cid.as_deref()) {
+        msg.reply(&format!("ℹ️ {} is not authorized in {}.", npub, scope_label)).await?;
         return Ok(());
     }
 
-    auth.remove(&npub);
-    msg.reply(&format!("✅ Removed {} from authorized users.", npub)).await?;
-    tracing::info!("Authorized user removed: {}", npub);
+    auth.remove(&npub, cid.as_deref());
+    msg.reply(&format!("✅ Removed {} from {} authorized users.", npub, scope_label)).await?;
+    tracing::info!("Authorized user removed: {} scope={:?}", npub, cid);
     Ok(())
 }
 
@@ -689,25 +716,30 @@ async fn list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     };
 
     let owner = auth.owner();
-    let authorized = auth.list();
+    let cid = community_id_from_msg(msg);
+    let (global, community) = auth.list(cid.as_deref());
 
-    if authorized.is_empty() {
-        msg.reply(&format!("Owner: {}\nAuthorized users: (none)", owner)).await?;
-        return Ok(());
+    let mut lines = vec![format!("Owner: {}", owner)];
+
+    if !global.is_empty() {
+        lines.push(format!("\n🌍 Global authorized ({}):", global.len()));
+        for n in &global {
+            lines.push(format!("  • {}", n));
+        }
     }
 
-    let body = authorized
-        .iter()
-        .map(|n| format!("  • {}", n))
-        .collect::<Vec<_>>()
-        .join("\n");
+    if !community.is_empty() {
+        lines.push(format!("\n📍 This community authorized ({}):", community.len()));
+        for n in &community {
+            lines.push(format!("  • {}", n));
+        }
+    }
 
-    msg.reply(&format!(
-        "Owner: {}\nAuthorized users ({}):\n{}",
-        owner,
-        authorized.len(),
-        body
-    )).await?;
+    if global.is_empty() && community.is_empty() {
+        lines.push("Authorized users: (none)".to_string());
+    }
+
+    msg.reply(&lines.join("\n")).await?;
     Ok(())
 }
 

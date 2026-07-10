@@ -10,7 +10,7 @@
 // If not configured, the auth system is disabled and all commands are public.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -53,10 +53,20 @@ impl std::fmt::Display for AuthLevel {
 // AuthState (serialization)
 // -----------------------------------------------------------------------------
 
-/// Serializable state for persisting the authorized list.
+/// Serializable state for persisting authorized users.
+/// Supports per-community scoping. Legacy format (flat `authorized` array)
+/// is auto-migrated to `authorized_global`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AuthState {
+    /// Legacy field — if present, migrated to authorized_global on load.
+    #[serde(default)]
     authorized: Vec<String>,
+    /// Globally authorized users (work in all communities).
+    #[serde(default)]
+    authorized_global: Vec<String>,
+    /// Per-community authorized users: community_id → list of npubs.
+    #[serde(default)]
+    authorized_by_community: HashMap<String, Vec<String>>,
 }
 
 // -----------------------------------------------------------------------------
@@ -77,7 +87,10 @@ pub struct AuthManager {
 
 struct AuthManagerInner {
     owner: String,
-    authorized: HashSet<String>,
+    /// Globally authorized (work in all communities + DMs).
+    authorized_global: HashSet<String>,
+    /// Per-community authorized: community_id → set of npubs.
+    authorized_by_community: HashMap<String, HashSet<String>>,
     persist: bool,
     state_file: PathBuf,
 }
@@ -93,29 +106,37 @@ impl AuthManager {
         persist: bool,
         state_file: PathBuf,
     ) -> anyhow::Result<Self> {
-        let mut authorized: HashSet<String> = initial_authorized.iter().cloned().collect();
+        let mut authorized_global: HashSet<String> = initial_authorized.iter().cloned().collect();
+        let mut authorized_by_community: HashMap<String, HashSet<String>> = HashMap::new();
 
         // Load persisted state if available.
         if persist && state_file.exists() {
             match std::fs::read_to_string(&state_file) {
                 Ok(contents) => {
                     if let Ok(state) = serde_json::from_str::<AuthState>(&contents) {
+                        // Migrate legacy flat authorized list to global
                         for npub in state.authorized {
-                            authorized.insert(npub);
+                            authorized_global.insert(npub);
                         }
+                        // Load global authorized
+                        for npub in state.authorized_global {
+                            authorized_global.insert(npub);
+                        }
+                        // Load per-community authorized
+                        for (cid, npubs) in state.authorized_by_community {
+                            let set: HashSet<String> = npubs.into_iter().collect();
+                            authorized_by_community.insert(cid, set);
+                        }
+                        let total = authorized_global.len() + authorized_by_community.values().map(|s| s.len()).sum::<usize>();
                         tracing::debug!(
-                            "Loaded {} authorized users from {}",
-                            authorized.len(),
+                            "Loaded {} authorized users ({} global, {} communities) from {}",
+                            total, authorized_global.len(), authorized_by_community.len(),
                             state_file.display()
                         );
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to read auth state file {}: {}",
-                        state_file.display(),
-                        e
-                    );
+                    tracing::warn!("Failed to read auth state file {}: {}", state_file.display(), e);
                 }
             }
         }
@@ -123,7 +144,8 @@ impl AuthManager {
         Ok(Self {
             inner: Arc::new(RwLock::new(AuthManagerInner {
                 owner: owner.to_string(),
-                authorized,
+                authorized_global,
+                authorized_by_community,
                 persist,
                 state_file,
             })),
@@ -132,21 +154,30 @@ impl AuthManager {
 
     // ---- Read operations --------------------------------------------------
 
-    /// Check the auth level for a given npub.
-    pub fn check(&self, npub: &str) -> AuthLevel {
+    /// Check the auth level for a given npub in a specific community.
+    /// `community_id` is None for DMs (only owner + global authorized pass).
+    pub fn check(&self, npub: &str, community_id: Option<&str>) -> AuthLevel {
         let inner = self.read();
         if npub == inner.owner {
             AuthLevel::Owner
-        } else if inner.authorized.contains(npub) {
+        } else if inner.authorized_global.contains(npub) {
             AuthLevel::Authorized
+        } else if let Some(cid) = community_id {
+            if let Some(set) = inner.authorized_by_community.get(cid) {
+                if set.contains(npub) {
+                    return AuthLevel::Authorized;
+                }
+            }
+            AuthLevel::Public
         } else {
             AuthLevel::Public
         }
     }
 
-    /// Returns true if the npub meets or exceeds the required auth level.
-    pub fn has_permission(&self, npub: &str, required: AuthLevel) -> bool {
-        self.check(npub) >= required
+    /// Returns true if the npub meets or exceeds the required auth level
+    /// in the given community context.
+    pub fn has_permission(&self, npub: &str, community_id: Option<&str>, required: AuthLevel) -> bool {
+        self.check(npub, community_id) >= required
     }
 
     /// Check if an npub is the owner.
@@ -155,18 +186,48 @@ impl AuthManager {
         npub == inner.owner
     }
 
-    /// Check if an npub is in the authorized set.
-    pub fn is_authorized(&self, npub: &str) -> bool {
+    /// Check if an npub is authorized in a specific community (or globally).
+    pub fn is_authorized(&self, npub: &str, community_id: Option<&str>) -> bool {
         let inner = self.read();
-        inner.authorized.contains(npub)
+        if inner.authorized_global.contains(npub) {
+            return true;
+        }
+        if let Some(cid) = community_id {
+            if let Some(set) = inner.authorized_by_community.get(cid) {
+                return set.contains(npub);
+            }
+        }
+        false
     }
 
-    /// List all authorized npubs (sorted alphabetically).
-    pub fn list(&self) -> Vec<String> {
+    /// List authorized npubs for a specific community (includes global).
+    /// Returns (global_list, community_list) tuple.
+    pub fn list(&self, community_id: Option<&str>) -> (Vec<String>, Vec<String>) {
         let inner = self.read();
-        let mut list: Vec<String> = inner.authorized.iter().cloned().collect();
-        list.sort();
-        list
+        let mut global: Vec<String> = inner.authorized_global.iter().cloned().collect();
+        global.sort();
+
+        let community: Vec<String> = if let Some(cid) = community_id {
+            match inner.authorized_by_community.get(cid) {
+                Some(set) => {
+                    let mut v: Vec<String> = set.iter().cloned().collect();
+                    v.sort();
+                    v
+                }
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+
+        (global, community)
+    }
+
+    /// Count total authorized users (global + all communities).
+    pub fn authorized_count(&self) -> usize {
+        let inner = self.read();
+        inner.authorized_global.len()
+            + inner.authorized_by_community.values().map(|s| s.len()).sum::<usize>()
     }
 
     /// Get the owner npub.
@@ -180,22 +241,24 @@ impl AuthManager {
         if owner.is_empty() { None } else { Some(owner) }
     }
 
-    /// Number of authorized users (excluding owner).
-    pub fn authorized_count(&self) -> usize {
-        self.read().authorized.len()
-    }
-
     // ---- Write operations -------------------------------------------------
 
-    /// Add an npub to the authorized set. Returns true if newly inserted.
-    /// Adding the owner is a no-op (they already have Owner-level access).
-    pub fn add(&self, npub: &str) -> bool {
+    /// Add an npub to the authorized set for a specific community.
+    /// If community_id is None, adds globally.
+    /// Returns true if newly inserted.
+    pub fn add(&self, npub: &str, community_id: Option<&str>) -> bool {
         let inserted = {
             let mut inner = self.write();
             if npub == inner.owner {
                 return false;
             }
-            inner.authorized.insert(npub.to_string())
+            match community_id {
+                None => inner.authorized_global.insert(npub.to_string()),
+                Some(cid) => {
+                    let set = inner.authorized_by_community.entry(cid.to_string()).or_default();
+                    set.insert(npub.to_string())
+                }
+            }
         };
         if inserted {
             self.save();
@@ -203,11 +266,22 @@ impl AuthManager {
         inserted
     }
 
-    /// Remove an npub from the authorized set. Returns true if it was present.
-    pub fn remove(&self, npub: &str) -> bool {
+    /// Remove an npub from authorized. If community_id is Some, only removes
+    /// from that community. If None, removes from global.
+    /// Returns true if it was present.
+    pub fn remove(&self, npub: &str, community_id: Option<&str>) -> bool {
         let removed = {
             let mut inner = self.write();
-            inner.authorized.remove(npub)
+            match community_id {
+                None => inner.authorized_global.remove(npub),
+                Some(cid) => {
+                    if let Some(set) = inner.authorized_by_community.get_mut(cid) {
+                        set.remove(npub)
+                    } else {
+                        false
+                    }
+                }
+            }
         };
         if removed {
             self.save();
@@ -225,7 +299,13 @@ impl AuthManager {
         }
 
         let state = AuthState {
-            authorized: inner.authorized.iter().cloned().collect(),
+            authorized: Vec::new(), // legacy, always empty now
+            authorized_global: inner.authorized_global.iter().cloned().collect(),
+            authorized_by_community: inner
+                .authorized_by_community
+                .iter()
+                .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+                .collect(),
         };
 
         let json = match serde_json::to_string_pretty(&state) {
@@ -307,7 +387,7 @@ mod tests {
     fn test_owner_is_owner() {
         let sf = tmp_state_file();
         let auth = AuthManager::new("npub1owner", &[], false, sf).unwrap();
-        assert_eq!(auth.check("npub1owner"), AuthLevel::Owner);
+        assert_eq!(auth.check("npub1owner", None), AuthLevel::Owner);
         assert!(auth.is_owner("npub1owner"));
     }
 
@@ -316,15 +396,15 @@ mod tests {
         let sf = tmp_state_file();
         let auth =
             AuthManager::new("npub1owner", &["npub1friend".to_string()], false, sf).unwrap();
-        assert_eq!(auth.check("npub1friend"), AuthLevel::Authorized);
-        assert!(auth.is_authorized("npub1friend"));
+        assert_eq!(auth.check("npub1friend", None), AuthLevel::Authorized);
+        assert!(auth.is_authorized("npub1friend", None));
     }
 
     #[test]
     fn test_unknown_is_public() {
         let sf = tmp_state_file();
         let auth = AuthManager::new("npub1owner", &[], false, sf).unwrap();
-        assert_eq!(auth.check("npub1random"), AuthLevel::Public);
+        assert_eq!(auth.check("npub1random", None), AuthLevel::Public);
     }
 
     #[test]
@@ -332,41 +412,55 @@ mod tests {
         let sf = tmp_state_file();
         let auth = AuthManager::new("npub1owner", &[], false, sf).unwrap();
 
-        assert!(auth.add("npub1new"));
-        assert_eq!(auth.check("npub1new"), AuthLevel::Authorized);
+        // Per-community add
+        assert!(auth.add("npub1new", Some("community_a")));
+        assert_eq!(auth.check("npub1new", Some("community_a")), AuthLevel::Authorized);
+        // Not authorized in other communities
+        assert_eq!(auth.check("npub1new", Some("community_b")), AuthLevel::Public);
+        assert_eq!(auth.check("npub1new", None), AuthLevel::Public);
 
         // Duplicate add is a no-op.
-        assert!(!auth.add("npub1new"));
-        // Can't add owner to authorized set.
-        assert!(!auth.add("npub1owner"));
+        assert!(!auth.add("npub1new", Some("community_a")));
+        // Can't add owner.
+        assert!(!auth.add("npub1owner", Some("community_a")));
 
-        assert!(auth.remove("npub1new"));
-        assert_eq!(auth.check("npub1new"), AuthLevel::Public);
+        // Global add works everywhere
+        assert!(auth.add("npub1global", None));
+        assert_eq!(auth.check("npub1global", Some("community_a")), AuthLevel::Authorized);
+        assert_eq!(auth.check("npub1global", None), AuthLevel::Authorized);
 
-        // Double remove is a no-op.
-        assert!(!auth.remove("npub1new"));
+        // Remove from specific community
+        assert!(auth.remove("npub1new", Some("community_a")));
+        assert_eq!(auth.check("npub1new", Some("community_a")), AuthLevel::Public);
+
+        // Global remove
+        assert!(auth.remove("npub1global", None));
+        assert_eq!(auth.check("npub1global", Some("community_a")), AuthLevel::Public);
     }
 
     #[test]
     fn test_has_permission() {
         let sf = tmp_state_file();
-        let auth =
-            AuthManager::new("npub1owner", &["npub1friend".to_string()], false, sf).unwrap();
+        let auth = AuthManager::new("npub1owner", &["npub1friend".to_string()], false, sf).unwrap();
 
-        // Owner can do everything.
-        assert!(auth.has_permission("npub1owner", AuthLevel::Owner));
-        assert!(auth.has_permission("npub1owner", AuthLevel::Authorized));
-        assert!(auth.has_permission("npub1owner", AuthLevel::Public));
+        // Owner can do everything (any context).
+        assert!(auth.has_permission("npub1owner", Some("comm_a"), AuthLevel::Owner));
+        assert!(auth.has_permission("npub1owner", None, AuthLevel::Owner));
 
-        // Authorized can do Authorized + Public.
-        assert!(!auth.has_permission("npub1friend", AuthLevel::Owner));
-        assert!(auth.has_permission("npub1friend", AuthLevel::Authorized));
-        assert!(auth.has_permission("npub1friend", AuthLevel::Public));
+        // Global authorized (from seed list) works in any context.
+        assert!(auth.has_permission("npub1friend", Some("comm_a"), AuthLevel::Authorized));
+        assert!(auth.has_permission("npub1friend", None, AuthLevel::Authorized));
+        assert!(!auth.has_permission("npub1friend", Some("comm_a"), AuthLevel::Owner));
+
+        // Community-scoped authorized only works in that community.
+        auth.add("npub1local", Some("comm_a"));
+        assert!(auth.has_permission("npub1local", Some("comm_a"), AuthLevel::Authorized));
+        assert!(!auth.has_permission("npub1local", Some("comm_b"), AuthLevel::Authorized));
+        assert!(!auth.has_permission("npub1local", None, AuthLevel::Authorized));
 
         // Public can only do Public.
-        assert!(!auth.has_permission("npub1random", AuthLevel::Owner));
-        assert!(!auth.has_permission("npub1random", AuthLevel::Authorized));
-        assert!(auth.has_permission("npub1random", AuthLevel::Public));
+        assert!(auth.has_permission("npub1random", Some("comm_a"), AuthLevel::Public));
+        assert!(!auth.has_permission("npub1random", Some("comm_a"), AuthLevel::Authorized));
     }
 
     #[test]
@@ -380,7 +474,16 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(auth.list(), vec!["npub1alpha", "npub1charlie"]);
+        // Seed list goes to global
+        let (global, community) = auth.list(Some("comm_a"));
+        assert_eq!(global, vec!["npub1alpha", "npub1charlie"]);
+        assert!(community.is_empty());
+
+        // Add a community-scoped user
+        auth.add("npub1bob", Some("comm_a"));
+        let (global, community) = auth.list(Some("comm_a"));
+        assert_eq!(global, vec!["npub1alpha", "npub1charlie"]);
+        assert_eq!(community, vec!["npub1bob"]);
     }
 
     #[test]
@@ -389,14 +492,14 @@ mod tests {
 
         {
             let auth = AuthManager::new("npub1owner", &[], true, sf.clone()).unwrap();
-            auth.add("npub1persist1");
-            auth.add("npub1persist2");
+            auth.add("npub1persist1", None); // global
+            auth.add("npub1persist2", None);
         }
 
         // Reload — should have persisted users.
         let auth = AuthManager::new("npub1owner", &[], true, sf.clone()).unwrap();
-        assert!(auth.is_authorized("npub1persist1"));
-        assert!(auth.is_authorized("npub1persist2"));
+        assert!(auth.is_authorized("npub1persist1", None));
+        assert!(auth.is_authorized("npub1persist2", None));
         assert_eq!(auth.authorized_count(), 2);
 
         let _ = std::fs::remove_file(&sf);
@@ -408,7 +511,7 @@ mod tests {
 
         {
             let auth = AuthManager::new("npub1owner", &[], false, sf.clone()).unwrap();
-            auth.add("npub1nopersist");
+            auth.add("npub1nopersist", None);
         }
 
         assert!(!sf.exists(), "state file should not exist when persist=false");
