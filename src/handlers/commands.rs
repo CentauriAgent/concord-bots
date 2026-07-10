@@ -51,6 +51,7 @@ async fn require_auth(ctx: &BotContext, msg: &IncomingMessage, level: AuthLevel)
     };
 
     let npub = sender_npub(msg);
+    tracing::info!("Auth check for npub={} (empty={}) level={:?}", npub, npub.is_empty(), level);
     if auth.has_permission(&npub, level) {
         return Ok(true);
     }
@@ -62,7 +63,9 @@ async fn require_auth(ctx: &BotContext, msg: &IncomingMessage, level: AuthLevel)
         }
         AuthLevel::Public => unreachable!("Public level should never be checked"),
     };
-    msg.reply(&response).await?;
+    if let Err(e) = msg.reply(&response).await {
+        tracing::error!("Failed to send auth denial reply: {:?}", e);
+    }
     Ok(false)
 }
 

@@ -607,8 +607,8 @@ impl Database {
             )
             .ok();
         match enabled {
-            Some(0) => Ok(false),
-            _ => Ok(true), // no row = enabled (default)
+            Some(1) => Ok(true),
+            _ => Ok(false), // no row or explicitly 0 = disabled (opt-in default)
         }
     }
 
@@ -634,8 +634,9 @@ impl Database {
     pub fn disable_channel(&self, channel_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO channel_state (channel_id, enabled, updated_at, updated_by) \
-             VALUES (?1, 0, ?2, 'system')",
+            "INSERT INTO channel_state (channel_id, enabled, updated_at, updated_by) \
+             VALUES (?1, 0, ?2, 'system') \
+             ON CONFLICT(channel_id) DO UPDATE SET enabled = 0, updated_at = ?2, updated_by = 'system'",
             rusqlite::params![channel_id, now()],
         )?;
         Ok(())
@@ -784,10 +785,10 @@ mod tests {
     }
 
     #[test]
-    fn test_channel_state_default_enabled() {
+    fn test_channel_state_default_disabled() {
         let db = test_db();
-        // No row = enabled (backward compat)
-        assert!(db.is_channel_enabled("ch1").unwrap());
+        // No row = disabled (opt-in default)
+        assert!(!db.is_channel_enabled("ch1").unwrap());
     }
 
     #[test]
