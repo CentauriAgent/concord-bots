@@ -326,20 +326,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             dispatch_moderation(ctx, msg, command, args).await?;
         }
 
-        "!mods"
-            if features.moderation => {
-            dispatch_moderation(ctx, msg, command, args).await?;
-        }
-
         "!grantmod" | "!revokemod"
-            if features.moderation => {
-            if !require_auth(ctx, msg, AuthLevel::Owner).await? {
-                return Ok(());
-            }
-            dispatch_moderation(ctx, msg, command, args).await?;
-        }
-
-        "!leave"
             if features.moderation => {
             if !require_auth(ctx, msg, AuthLevel::Owner).await? {
                 return Ok(());
@@ -549,13 +536,11 @@ async fn dispatch_moderation(
     args: &str,
 ) -> Result<()> {
     match command {
-        "!leave" => moderation_cmds::leave_command(ctx, msg, args).await?,
         "!kick" => moderation_cmds::kick_command(ctx, msg, args).await?,
         "!ban" => moderation_cmds::ban_command(ctx, msg, args).await?,
         "!unban" => moderation_cmds::unban_command(ctx, msg, args).await?,
         "!warn" => moderation_cmds::warn_command(ctx, msg, args).await?,
         "!warnings" => moderation_cmds::warnings_command(ctx, msg, args).await?,
-        "!mods" => moderation_cmds::mods_command(ctx, msg, args).await?,
         "!grantmod" => moderation_cmds::grantmod_command(ctx, msg, args).await?,
         "!revokemod" => moderation_cmds::revokemod_command(ctx, msg, args).await?,
         _ => unreachable!("dispatch_moderation called with non-moderation command: {}", command),
@@ -850,11 +835,9 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!unban",    description: "Lift a ban",                          feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!warn",     description: "Warn a member",                       feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
     CommandMeta { name: "!warnings", description: "Show warning history",                feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
-    CommandMeta { name: "!mods",     description: "List mods/admins",                    feature: Some(Feature::Moderation), auth: AuthLevel::Public },
     CommandMeta { name: "!welcome", description: "Toggle welcome messages on/off",       feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
-    CommandMeta { name: "!leave",     description: "Leave the current community",          feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
 
     // Community Engagement
     CommandMeta { name: "!level",     description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
@@ -983,7 +966,7 @@ mod tests {
         assert!(help.contains("!unban"));
         assert!(help.contains("!warn"));
         assert!(help.contains("!warnings"));
-        assert!(help.contains("!mods"));
+        assert!(help.contains("!grantmod"));
         assert!(help.contains("!grantmod"));
         assert!(help.contains("!revokemod"));
     }
