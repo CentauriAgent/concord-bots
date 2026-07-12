@@ -401,7 +401,7 @@ async fn publish_profile_with_lud16(
         Err(e) => { tracing::warn!("Failed to parse nsec: {:?}", e); return false; }
     };
 
-    let mut meta = serde_json::json!({ "name": name, "about": about });
+    let mut meta = serde_json::json!({ "name": name, "about": about, "bot": true });
     if !picture.is_empty() { meta["picture"] = serde_json::Value::String(picture.to_string()); }
     if !banner.is_empty() { meta["banner"] = serde_json::Value::String(banner.to_string()); }
     if !lud16.is_empty() { meta["lud16"] = serde_json::Value::String(lud16.to_string()); }
