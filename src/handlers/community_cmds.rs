@@ -96,6 +96,12 @@ fn parse_duration(s: &str) -> Option<u64> {
 // -----------------------------------------------------------------------------
 
 pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    // Check per-community leaderboard toggle
+    if !ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true) {
+        super::reply(ctx, msg, "📊 Leaderboard is disabled in this community.").await?;
+        return Ok(());
+    }
+
     let target_npub = if args.trim().is_empty() {
         msg.message.npub.clone().unwrap_or_default()
     } else {
@@ -140,7 +146,47 @@ pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) 
 // !leaderboard
 // -----------------------------------------------------------------------------
 
-pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+    let args = args.trim();
+
+    // Handle on/off/status subcommands
+    match args {
+        "on" | "off" => {
+            // Check authorization
+            let authorized = ctx.auth.as_ref().map(|auth| {
+                let npub = msg.message.npub.as_deref().unwrap_or("");
+                auth.has_permission(npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Authorized)
+            }).unwrap_or(true); // No auth configured = allow
+
+            if !authorized {
+                super::reply(ctx, msg, "⛔ Not authorized. Ask the owner to add your npub.").await?;
+                return Ok(());
+            }
+            let enabled = args == "on";
+            if let Err(e) = ctx.community_db.set_leaderboard_enabled(&msg.chat_id, enabled) {
+                tracing::warn!("Failed to set leaderboard toggle: {}", e);
+                super::reply(ctx, msg, "⚠️ Could not update leaderboard setting.").await?;
+                return Ok(());
+            }
+            let status = if enabled { "enabled ✅" } else { "disabled ⛔" };
+            super::reply(ctx, msg, &format!("📊 Leaderboard is now {} for this community.", status)).await?;
+            return Ok(());
+        }
+        "status" => {
+            let enabled = ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true);
+            let status = if enabled { "enabled ✅" } else { "disabled ⛔" };
+            super::reply(ctx, msg, &format!("📊 Leaderboard is {} for this community.", status)).await?;
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // Check if leaderboard is enabled before showing it
+    if !ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true) {
+        super::reply(ctx, msg, "📊 Leaderboard is disabled in this community. Use `!leaderboard on` to enable (requires authorization).").await?;
+        return Ok(());
+    }
+
     let entries = match ctx.community_db.get_leaderboard(10) {
         Ok(e) => e,
         Err(e) => {
@@ -201,28 +247,45 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         }
     };
 
-    let rank = ctx
-        .community_db
-        .get_rank(&target_npub)
-        .ok()
-        .flatten()
-        .map(|r| format!("#{}", r))
-        .unwrap_or_else(|| "Unranked".to_string());
-
     let total_sats = stats.sats_tipped + stats.sats_zapped;
     let member_since = format_member_since(stats.first_seen);
 
-    let response = format!(
-        "👤 {}\n📊 Level {} · {} XP\n📈 {} on leaderboard\n⚡ {} sats tipped/zapped\n💬 {} messages\n🎯 Member since {}\n⭐ Reputation: {}",
-        short_npub(&target_npub),
-        stats.level,
-        stats.xp,
-        rank,
-        total_sats,
-        stats.messages_sent,
-        member_since,
-        stats.rep
-    );
+    // Hide level/XP/rank lines when leaderboard is disabled in this community
+    let leaderboard_on = ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true);
+
+    let rank = if leaderboard_on {
+        ctx.community_db
+            .get_rank(&target_npub)
+            .ok()
+            .flatten()
+            .map(|r| format!("#{}", r))
+            .unwrap_or_else(|| "Unranked".to_string())
+    } else {
+        "Hidden".to_string()
+    };
+
+    let response = if leaderboard_on {
+        format!(
+            "👤 {}\n📊 Level {} · {} XP\n📈 {} on leaderboard\n⚡ {} sats tipped/zapped\n💬 {} messages\n🎯 Member since {}\n⭐ Reputation: {}",
+            short_npub(&target_npub),
+            stats.level,
+            stats.xp,
+            rank,
+            total_sats,
+            stats.messages_sent,
+            member_since,
+            stats.rep
+        )
+    } else {
+        format!(
+            "👤 {}\n⚡ {} sats tipped/zapped\n💬 {} messages\n🎯 Member since {}\n⭐ Reputation: {}\n\n📊 Leaderboard is disabled in this community.",
+            short_npub(&target_npub),
+            total_sats,
+            stats.messages_sent,
+            member_since,
+            stats.rep
+        )
+    };
 
     super::reply(ctx, msg, &response).await?;
     Ok(())

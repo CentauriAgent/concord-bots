@@ -118,8 +118,12 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
 
             // Community XP: sender gets +5 XP for tipping
             if let Some(ref sender_npub) = msg.message.npub {
-                if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
-                    tracing::warn!("Failed to award tip XP to sender: {}", e);
+                if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
+                    && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+                {
+                    if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
+                        tracing::warn!("Failed to award tip XP to sender: {}", e);
+                    }
                 }
                 if let Err(e) = ctx.community_db.add_sats_tipped(sender_npub, sats as i64) {
                     tracing::warn!("Failed to track tipped sats: {}", e);
@@ -417,16 +421,24 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
 
             // Community XP: sender gets +5, recipient gets +10
             if let Some(ref sender_npub) = msg.message.npub {
-                if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
-                    tracing::warn!("Failed to award zap XP to sender: {}", e);
+                if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
+                    && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+                {
+                    if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
+                        tracing::warn!("Failed to award zap XP to sender: {}", e);
+                    }
                 }
                 if let Err(e) = ctx.community_db.add_sats_zapped(sender_npub, sats as i64) {
                     tracing::warn!("Failed to track zapped sats: {}", e);
                 }
             }
             // Award recipient XP (using npub_input as the recipient identifier)
-            if let Err(e) = ctx.community_db.award_xp(&npub_input, 10, &msg.chat_id) {
-                tracing::warn!("Failed to award zap XP to recipient: {}", e);
+            if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
+                && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+            {
+                if let Err(e) = ctx.community_db.award_xp(&npub_input, 10, &msg.chat_id) {
+                    tracing::warn!("Failed to award zap XP to recipient: {}", e);
+                }
             }
         }
         Err(e) => {

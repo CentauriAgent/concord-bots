@@ -171,6 +171,11 @@ impl Database {
                 updated_at  INTEGER,
                 updated_by  TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS community_settings (
+                community_id        TEXT PRIMARY KEY,
+                leaderboard_enabled INTEGER NOT NULL DEFAULT 1
+            );
             ",
         )?;
         Ok(Self {
@@ -354,6 +359,39 @@ impl Database {
             )
             .ok();
         Ok(rank)
+    }
+
+    // ---------------------------------------------------------------------
+    // Community Settings (leaderboard toggle, etc.)
+    // ---------------------------------------------------------------------
+
+    /// Returns true if leaderboard/XP is active for this community.
+    /// Falls back to the global config default when no override exists.
+    pub fn is_leaderboard_enabled(&self, community_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let row: Option<(i64,)> = conn
+            .query_row(
+                "SELECT leaderboard_enabled FROM community_settings WHERE community_id = ?1",
+                rusqlite::params![community_id],
+                |row| Ok((row.get(0)?,)),
+            )
+            .ok();
+        Ok(row.map(|(v,)| v != 0).unwrap_or(true))
+    }
+
+    /// Set per-community leaderboard override.
+    pub fn set_leaderboard_enabled(
+        &self,
+        community_id: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO community_settings (community_id, leaderboard_enabled) VALUES (?1, ?2)
+             ON CONFLICT(community_id) DO UPDATE SET leaderboard_enabled = ?2",
+            rusqlite::params![community_id, enabled as i32],
+        )?;
+        Ok(())
     }
 
     // ---------------------------------------------------------------------

@@ -364,7 +364,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         // =====================================================================
 
         "!level" | "!rank"
-            if features.community => {
+            if features.community && features.is_enabled(Feature::Leaderboard) => {
             dispatch_community(ctx, msg, command, args).await?;
         }
 
@@ -564,7 +564,7 @@ async fn dispatch_community(
 ) -> Result<()> {
     match command {
         "!level" | "!rank" => community_cmds::level_command(ctx, msg, args).await?,
-        "!leaderboard" => community_cmds::leaderboard_command(ctx, msg).await?,
+        "!leaderboard" => community_cmds::leaderboard_command(ctx, msg, args).await?,
         "!profile" => community_cmds::profile_command(ctx, msg, args).await?,
         "!giveaway" => community_cmds::giveaway_command(ctx, msg, args).await?,
         "!rep" => community_cmds::rep_command(ctx, msg, args).await?,
@@ -874,7 +874,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     // Community Engagement
     CommandMeta { name: "!level",     description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
     CommandMeta { name: "!rank",      description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
-    CommandMeta { name: "!leaderboard", description: "Top 10 users by XP",                 feature: Some(Feature::Community), auth: AuthLevel::Public },
+    CommandMeta { name: "!leaderboard", description: "Top 10 by XP, or on/off/status",   feature: Some(Feature::Community), auth: AuthLevel::Public },
     CommandMeta { name: "!profile",   description: "Show user profile card",               feature: Some(Feature::Community), auth: AuthLevel::Public },
     CommandMeta { name: "!giveaway",  description: "Start a giveaway (Authorized+)",      feature: Some(Feature::Community), auth: AuthLevel::Authorized },
     CommandMeta { name: "!rep",       description: "Give reputation (+1)",                 feature: Some(Feature::Community), auth: AuthLevel::Public },

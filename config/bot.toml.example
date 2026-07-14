@@ -152,6 +152,9 @@ invite_policy = "owner"
 # ai = false            # AI-powered responses to non-command messages
 # thread_replies = true # Send command responses as kind 1111 threaded replies (CORD-03 §3)
 #                        # When false, uses regular kind 9 inline replies
+# leaderboard = true    # XP tracking, level-ups, !level/!rank/!leaderboard
+#                        # Can also be toggled per-community with !leaderboard on|off
+#                        # When false, uses regular kind 9 inline replies
 
 # =============================================================================
 # V2 Community Management — Concord v2 protocol features

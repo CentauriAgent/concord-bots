@@ -223,19 +223,28 @@ async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str) {
     }
 
     // Award 15-25 random XP (compute before any .await)
-    let xp = {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        rng.gen_range(15..=25)
-    };
+    // Skip entirely if leaderboard is disabled globally or in this community
+    let leaderboard_globally_on = ctx.config.features.is_enabled(crate::config::Feature::Leaderboard);
+    let leaderboard_community_on = ctx
+        .community_db
+        .is_leaderboard_enabled(channel_id)
+        .unwrap_or(true);
 
-    let leveled_up_info = ctx.community_db.award_xp(npub, xp, channel_id)
-        .ok()
-        .filter(|(_, leveled_up)| *leveled_up);
+    if leaderboard_globally_on && leaderboard_community_on {
+        let xp = {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            rng.gen_range(15..=25)
+        };
 
-    if let Some((new_level, true)) = leveled_up_info {
-        let announcement = format!("🎉 nostr:{} reached Level {}!", npub, new_level);
-        let _ = ctx.bot.channel(channel_id.to_string()).send(&announcement).await;
+        let leveled_up_info = ctx.community_db.award_xp(npub, xp, channel_id)
+            .ok()
+            .filter(|(_, leveled_up)| *leveled_up);
+
+        if let Some((new_level, true)) = leveled_up_info {
+            let announcement = format!("🎉 nostr:{} reached Level {}!", npub, new_level);
+            let _ = ctx.bot.channel(channel_id.to_string()).send(&announcement).await;
+        }
     }
 }
 
@@ -299,7 +308,11 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MessageUpdate { chat_id, message } => {
             tracing::debug!("Message update in chat {}: {} reactions", chat_id, message.reactions.len());
             // Award XP for reactions on the author's message (community engagement)
-            if ctx.config.features.is_enabled(Feature::Community) && !message.reactions.is_empty() {
+            if ctx.config.features.is_enabled(Feature::Community)
+                && ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
+                && ctx.community_db.is_leaderboard_enabled(chat_id).unwrap_or(true)
+                && !message.reactions.is_empty()
+            {
                 if let Some(ref npub) = message.npub {
                     if npub != &ctx.bot.npub() {
                         // Small XP for getting a reaction (3-5 XP)

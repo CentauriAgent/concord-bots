@@ -56,6 +56,7 @@ pub enum Feature {
     Ai,
     Moderation,
     GitMonitor,
+    Leaderboard,
 }
 
 /// Feature flags for command groups. All default to `true` except `ai`.
@@ -79,6 +80,11 @@ pub struct FeaturesSection {
     /// (CORD-03 §3) instead of kind 9 inline replies, reducing channel clutter.
     #[serde(default = "default_true")]
     pub thread_replies: bool,
+    /// XP tracking, level-up announcements, and leaderboard commands.
+    /// When false, no XP is awarded and !level/!rank/!leaderboard are disabled.
+    /// Can also be toggled per-community with !leaderboard on|off.
+    #[serde(default = "default_true")]
+    pub leaderboard: bool,
 }
 
 impl Default for FeaturesSection {
@@ -92,6 +98,7 @@ impl Default for FeaturesSection {
             moderation: true,
             git_monitor: true,
             thread_replies: true,
+            leaderboard: true,
         }
     }
 }
@@ -107,6 +114,7 @@ impl FeaturesSection {
             Feature::Ai => self.ai,
             Feature::Moderation => self.moderation,
             Feature::GitMonitor => self.git_monitor,
+            Feature::Leaderboard => self.leaderboard,
         }
     }
 }
