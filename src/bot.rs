@@ -302,13 +302,19 @@ pub async fn run(config: BotConfig) -> Result<()> {
                 Ok(summary) => {
                     tracing::info!("Joined community: {:?}", summary);
                     // Disable all channels from the join summary (opt-in default)
+                    // — but only if they aren't already enabled (preserve prior !enable state)
                     if let Some(channels) = summary.get("channels").and_then(|v| v.as_array()) {
                         for ch in channels {
                             if let Some(ch_id) = ch.get("channel_id").and_then(|v| v.as_str()) {
-                                if let Err(e) = ctx.community_db.disable_channel(ch_id) {
-                                    tracing::warn!("Failed to disable channel {}: {}", ch_id, e);
+                                let already_enabled = ctx.community_db.is_channel_enabled(ch_id).unwrap_or(false);
+                                if !already_enabled {
+                                    if let Err(e) = ctx.community_db.disable_channel(ch_id) {
+                                        tracing::warn!("Failed to disable channel {}: {}", ch_id, e);
+                                    } else {
+                                        tracing::info!("Channel {} disabled (opt-in default)", ch_id);
+                                    }
                                 } else {
-                                    tracing::info!("Channel {} disabled (opt-in default)", ch_id);
+                                    tracing::info!("Channel {} already enabled — preserving state", ch_id);
                                 }
                             }
                         }
