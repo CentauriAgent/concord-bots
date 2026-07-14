@@ -97,7 +97,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     };
 
     // Send the AI response as a reply.
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
 
     Ok(())
 }

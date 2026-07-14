@@ -75,6 +75,10 @@ pub struct FeaturesSection {
     pub moderation: bool,
     #[serde(default = "default_true")]
     pub git_monitor: bool,
+    /// When true, bot command responses are sent as kind 1111 threaded replies
+    /// (CORD-03 §3) instead of kind 9 inline replies, reducing channel clutter.
+    #[serde(default = "default_true")]
+    pub thread_replies: bool,
 }
 
 impl Default for FeaturesSection {
@@ -87,6 +91,7 @@ impl Default for FeaturesSection {
             ai: false,
             moderation: true,
             git_monitor: true,
+            thread_replies: true,
         }
     }
 }

@@ -23,7 +23,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let input = args.trim();
 
     if input.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "Usage: !git add <url|owner/repo>\n\
              Examples:\n\
              !git add https://github.com/owner/repo\n\
@@ -38,7 +38,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let store = match &ctx.git_store {
         Some(s) => s,
         None => {
-            msg.reply("⚠️ Git monitor is not initialized.").await?;
+            super::reply(ctx, msg, "⚠️ Git monitor is not initialized.").await?;
             return Ok(());
         }
     };
@@ -47,7 +47,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let parsed = match detect::parse_repo(input) {
         Ok(p) => p,
         Err(e) => {
-            msg.reply(&format!("⚠️ {}", e)).await?;
+            super::reply(ctx, msg, &format!("⚠️ {}", e)).await?;
             return Ok(());
         }
     };
@@ -58,7 +58,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     // Check max repos limit
     match store.count_for_channel(channel_id) {
         Ok(count) if count >= max_repos => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚠️ This channel already has {} subscriptions (max: {}). \
                  Use !git remove to free up space.",
                 count, max_repos
@@ -69,14 +69,14 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         Ok(_) => {}
         Err(e) => {
             tracing::warn!("Git monitor: count error: {}", e);
-            msg.reply("⚠️ Could not check subscription count.").await?;
+            super::reply(ctx, msg, "⚠️ Could not check subscription count.").await?;
             return Ok(());
         }
     }
 
     // Check if already subscribed
     if let Ok(true) = store.exists(channel_id, parsed.host, &parsed.owner, &parsed.repo) {
-        msg.reply(&format!(
+        super::reply(ctx, msg, &format!(
             "ℹ️ Already subscribed to {} in this channel.",
             parsed.slug()
         ))
@@ -87,7 +87,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     // Add the subscription
     let added_by = msg.message.npub.clone().unwrap_or_default();
     if let Err(e) = store.add(channel_id, parsed.host, &parsed.owner, &parsed.repo, &added_by) {
-        msg.reply(&format!("⚠️ Could not add subscription: {}", e)).await?;
+        super::reply(ctx, msg, &format!("⚠️ Could not add subscription: {}", e)).await?;
         return Ok(());
     }
 
@@ -96,7 +96,7 @@ pub async fn git_add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         RepoHost::GitLab => "GitLab",
     };
 
-    msg.reply(&format!(
+    super::reply(ctx, msg, &format!(
         "✅ Subscribed to {} {} ({})\n\
          New commits and releases will be announced here automatically.\n\
          Use !git remove {} to unsubscribe.",
@@ -125,7 +125,7 @@ pub async fn git_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
     let store = match &ctx.git_store {
         Some(s) => s,
         None => {
-            msg.reply("⚠️ Git monitor is not initialized.").await?;
+            super::reply(ctx, msg, "⚠️ Git monitor is not initialized.").await?;
             return Ok(());
         }
     };
@@ -135,13 +135,13 @@ pub async fn git_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("Git monitor: list error: {}", e);
-            msg.reply("⚠️ Could not retrieve subscriptions.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve subscriptions.").await?;
             return Ok(());
         }
     };
 
     if subs.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "📦 No repo subscriptions in this channel.\n\
              Use !git add <url|owner/repo> to subscribe.",
         )
@@ -167,7 +167,7 @@ pub async fn git_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
     }
     lines.push("\nUse !git remove <number|slug> to unsubscribe.".to_string());
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
@@ -179,7 +179,7 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
     let input = args.trim();
 
     if input.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "Usage: !git remove <repo-slug|id>\n\
              Examples: !git remove owner/repo, !git remove 3",
         )
@@ -190,7 +190,7 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
     let store = match &ctx.git_store {
         Some(s) => s,
         None => {
-            msg.reply("⚠️ Git monitor is not initialized.").await?;
+            super::reply(ctx, msg, "⚠️ Git monitor is not initialized.").await?;
             return Ok(());
         }
     };
@@ -200,19 +200,19 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
     // Try parsing as a positional number (1-based index into this channel's list)
     if let Ok(pos) = input.parse::<usize>() {
         if pos == 0 {
-            msg.reply("⚠️ Numbers start at 1. Use !git list to see positions.").await?;
+            super::reply(ctx, msg, "⚠️ Numbers start at 1. Use !git list to see positions.").await?;
             return Ok(());
         }
         let subs = match store.list_for_channel(channel_id) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("Git monitor: list error during remove: {}", e);
-                msg.reply("⚠️ Could not look up subscriptions.").await?;
+                super::reply(ctx, msg, "⚠️ Could not look up subscriptions.").await?;
                 return Ok(());
             }
         };
         if pos > subs.len() {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚠️ No subscription #{}. This channel has {} repo(s). Use !git list to see them.",
                 pos, subs.len()
             ))
@@ -222,15 +222,15 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
         let sub = &subs[pos - 1];
         match store.remove_by_id(sub.id) {
             Ok(true) => {
-                msg.reply(&format!("✅ Removed {} (was #{})", sub.full_slug, pos)).await?;
+                super::reply(ctx, msg, &format!("✅ Removed {} (was #{})", sub.full_slug, pos)).await?;
                 tracing::info!("Git monitor: removed {} from channel {}", sub.full_slug, channel_id);
             }
             Ok(false) => {
-                msg.reply("⚠️ Subscription vanished before removal.").await?;
+                super::reply(ctx, msg, "⚠️ Subscription vanished before removal.").await?;
             }
             Err(e) => {
                 tracing::warn!("Git monitor: remove error: {}", e);
-                msg.reply("⚠️ Could not remove subscription.").await?;
+                super::reply(ctx, msg, "⚠️ Could not remove subscription.").await?;
             }
         }
         return Ok(());
@@ -240,14 +240,14 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
     let parsed = match detect::parse_repo(input) {
         Ok(p) => p,
         Err(e) => {
-            msg.reply(&format!("⚠️ {}", e)).await?;
+            super::reply(ctx, msg, &format!("⚠️ {}", e)).await?;
             return Ok(());
         }
     };
 
     match store.remove(channel_id, parsed.host, &parsed.owner, &parsed.repo) {
         Ok(true) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "✅ Unsubscribed from {} {}.",
                 match parsed.host {
                     RepoHost::GitHub => "GitHub",
@@ -263,7 +263,7 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
             );
         }
         Ok(false) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚠️ No subscription for {} in this channel.",
                 parsed.slug()
             ))
@@ -271,7 +271,7 @@ pub async fn git_remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &
         }
         Err(e) => {
             tracing::warn!("Git monitor: remove error: {}", e);
-            msg.reply("⚠️ Could not remove subscription.").await?;
+            super::reply(ctx, msg, "⚠️ Could not remove subscription.").await?;
         }
     }
 
@@ -286,7 +286,7 @@ pub async fn git_poll_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
     let store = match &ctx.git_store {
         Some(s) => s,
         None => {
-            msg.reply("⚠️ Git monitor is not initialized.").await?;
+            super::reply(ctx, msg, "⚠️ Git monitor is not initialized.").await?;
             return Ok(());
         }
     };
@@ -296,17 +296,17 @@ pub async fn git_poll_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("Git monitor: list error: {}", e);
-            msg.reply("⚠️ Could not retrieve subscriptions.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve subscriptions.").await?;
             return Ok(());
         }
     };
 
     if subs.is_empty() {
-        msg.reply("📦 No subscriptions in this channel to poll.").await?;
+        super::reply(ctx, msg, "📦 No subscriptions in this channel to poll.").await?;
         return Ok(());
     }
 
-    msg.reply(&format!("🔄 Force-polling {} subscriptions…", subs.len()))
+    super::reply(ctx, msg, &format!("🔄 Force-polling {} subscriptions…", subs.len()))
         .await?;
 
     // Run poll_all in a spawned task so we don't block the command handler
@@ -334,7 +334,7 @@ pub async fn git_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         "remove" | "rm" | "delete" => git_remove_command(ctx, msg, rest).await?,
         "poll" => git_poll_command(ctx, msg).await?,
         "" => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "📦 Git Monitor commands:\n\
                  !git add <url|owner/repo> — Subscribe to a repo\n\
                  !git list — Show subscriptions\n\
@@ -344,7 +344,7 @@ pub async fn git_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             .await?;
         }
         _ => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚠️ Unknown !git subcommand \"{}\". Try: !git add, !git list, !git remove, !git poll",
                 subcommand
             ))

@@ -13,22 +13,22 @@ use crate::lib::http;
 // !delete <msg_id> — Delete a message (bot's own or MANAGE_MESSAGES in v2)
 // -----------------------------------------------------------------------------
 
-pub async fn delete_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn delete_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let msg_id = args.trim();
     if msg_id.is_empty() {
-        msg.reply("Usage: !delete <message_id>\n\nDeletes a message. You can only delete your own messages, or messages in communities where you have MANAGE_MESSAGES capability.").await?;
+        super::reply(ctx, msg, "Usage: !delete <message_id>\n\nDeletes a message. You can only delete your own messages, or messages in communities where you have MANAGE_MESSAGES capability.").await?;
         return Ok(());
     }
 
     let channel = msg.channel();
     match channel.delete(msg_id).await {
-        Ok(()) => { msg.reply("🗑️ Message deleted.").await?; }
+        Ok(()) => { super::reply(ctx, msg, "🗑️ Message deleted.").await?; }
         Err(e) => {
             let err = format!("{:?}", e).to_lowercase();
             if err.contains("permission") || err.contains("manage") {
-                msg.reply("⚠️ I don't have permission to delete that message.").await?;
+                super::reply(ctx, msg, "⚠️ I don't have permission to delete that message.").await?;
             } else {
-                msg.reply(&format!("⚠️ Delete failed: {}", e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Delete failed: {}", e)).await?;
             }
         }
     }
@@ -39,24 +39,24 @@ pub async fn delete_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
 // !edit <msg_id> <text> — Edit a message (bot's own only)
 // -----------------------------------------------------------------------------
 
-pub async fn edit_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn edit_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
     if parts.len() < 2 {
-        msg.reply("Usage: !edit <message_id> <new text>").await?;
+        super::reply(ctx, msg, "Usage: !edit <message_id> <new text>").await?;
         return Ok(());
     }
     let msg_id = parts[0].trim();
     let new_text = parts[1].trim();
 
     if msg_id.is_empty() || new_text.is_empty() {
-        msg.reply("Usage: !edit <message_id> <new text>").await?;
+        super::reply(ctx, msg, "Usage: !edit <message_id> <new text>").await?;
         return Ok(());
     }
 
     let channel = msg.channel();
     match channel.edit(msg_id, new_text).await {
-        Ok(()) => { msg.reply("✏️ Message edited.").await?; }
-        Err(e) => { msg.reply(&format!("⚠️ Edit failed: {}", e)).await?; }
+        Ok(()) => { super::reply(ctx, msg, "✏️ Message edited.").await?; }
+        Err(e) => { super::reply(ctx, msg, &format!("⚠️ Edit failed: {}", e)).await?; }
     }
     Ok(())
 }
@@ -67,13 +67,13 @@ pub async fn edit_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
 
 pub async fn savefile_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
     if !msg.is_file {
-        msg.reply("⚠️ This command works on messages with file attachments. Reply to a file message with !savefile.").await?;
+        super::reply(ctx, msg, "⚠️ This command works on messages with file attachments. Reply to a file message with !savefile.").await?;
         return Ok(());
     }
 
     let download_dir = std::path::PathBuf::from("./data/downloads");
     if let Err(e) = std::fs::create_dir_all(&download_dir) {
-        msg.reply(&format!("⚠️ Failed to create download dir: {}", e)).await?;
+        super::reply(ctx, msg, &format!("⚠️ Failed to create download dir: {}", e)).await?;
         return Ok(());
     }
 
@@ -86,10 +86,10 @@ pub async fn savefile_command(ctx: &BotContext, msg: &IncomingMessage, _args: &s
 
         match ctx.bot.save_attachment(att, download_dir.join(&filename)).await {
             Ok(path) => {
-                msg.reply(&format!("💾 Saved {} ({} bytes) to {}", filename, att.size, path.display())).await?;
+                super::reply(ctx, msg, &format!("💾 Saved {} ({} bytes) to {}", filename, att.size, path.display())).await?;
             }
             Err(e) => {
-                msg.reply(&format!("⚠️ Failed to save {}: {}", filename, e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Failed to save {}: {}", filename, e)).await?;
             }
         }
     }
@@ -112,7 +112,7 @@ pub fn increment_message_count() {
 // !price — Bitcoin price in USD
 // -----------------------------------------------------------------------------
 
-pub async fn price_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn price_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true";
     let data = match http::fetch_json(url).await {
         Ok(d) => d,
@@ -126,14 +126,14 @@ pub async fn price_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<(
                 Ok(f) => {
                     let price = &f["data"]["amount"];
                     if let Some(p) = price.as_str() {
-                        msg.reply(&format!("₿ Bitcoin: ${}", p)).await?;
+                        super::reply(ctx, msg, &format!("₿ Bitcoin: ${}", p)).await?;
                         return Ok(());
                     }
-                    msg.reply("⚠️ Could not fetch Bitcoin price right now.").await?;
+                    super::reply(ctx, msg, "⚠️ Could not fetch Bitcoin price right now.").await?;
                     return Ok(());
                 }
                 Err(_) => {
-                    msg.reply("⚠️ Could not fetch Bitcoin price right now.").await?;
+                    super::reply(ctx, msg, "⚠️ Could not fetch Bitcoin price right now.").await?;
                     return Ok(());
                 }
             }
@@ -153,7 +153,7 @@ pub async fn price_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<(
         })
         .unwrap_or_default();
 
-    msg.reply(&format!("₿ Bitcoin: {}{}", price, change)).await?;
+    super::reply(ctx, msg, &format!("₿ Bitcoin: {}{}", price, change)).await?;
     Ok(())
 }
 
@@ -177,7 +177,7 @@ fn format_number(n: f64) -> String {
 // !time [timezone] — Current time
 // -----------------------------------------------------------------------------
 
-pub async fn time_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn time_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let tz = args.trim();
 
     let response = if tz.is_empty() {
@@ -208,7 +208,7 @@ pub async fn time_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         }
     };
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -216,7 +216,7 @@ pub async fn time_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
 // !roll [NdS] — Dice roller
 // -----------------------------------------------------------------------------
 
-pub async fn roll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn roll_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     use rand::Rng;
 
     let args = args.trim();
@@ -231,18 +231,18 @@ pub async fn roll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         match args.parse::<u32>() {
             Ok(s) => (1, s),
             Err(_) => {
-                msg.reply("Usage: !roll [NdS] — e.g. !roll, !roll 20, !roll 3d6").await?;
+                super::reply(ctx, msg, "Usage: !roll [NdS] — e.g. !roll, !roll 20, !roll 3d6").await?;
                 return Ok(());
             }
         }
     };
 
     if count == 0 || count > 100 {
-        msg.reply("⚠️ Roll between 1 and 100 dice.").await?;
+        super::reply(ctx, msg, "⚠️ Roll between 1 and 100 dice.").await?;
         return Ok(());
     }
     if sides < 2 || sides > 1000 {
-        msg.reply("⚠️ Dice must have 2-1000 sides.").await?;
+        super::reply(ctx, msg, "⚠️ Dice must have 2-1000 sides.").await?;
         return Ok(());
     }
 
@@ -264,7 +264,7 @@ pub async fn roll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         format!("🎲 [{}] = {} ({}d{})", rolls_str, total, count, sides)
     };
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -305,7 +305,7 @@ pub async fn stats_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()
         npub,
     );
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -330,11 +330,11 @@ fn format_uptime(secs: u64) -> String {
 // !weather <zipcode> — Weather via Open-Meteo
 // -----------------------------------------------------------------------------
 
-pub async fn weather_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn weather_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let zipcode = args.trim();
 
     if zipcode.is_empty() {
-        msg.reply("Usage: !weather <zipcode>\nExample: !weather 10001").await?;
+        super::reply(ctx, msg, "Usage: !weather <zipcode>\nExample: !weather 10001").await?;
         return Ok(());
     }
 
@@ -348,7 +348,7 @@ pub async fn weather_command(_ctx: &BotContext, msg: &IncomingMessage, args: &st
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Geocode failed: {}", e);
-            msg.reply("⚠️ Could not look up that zipcode.").await?;
+            super::reply(ctx, msg, "⚠️ Could not look up that zipcode.").await?;
             return Ok(());
         }
     };
@@ -357,7 +357,7 @@ pub async fn weather_command(_ctx: &BotContext, msg: &IncomingMessage, args: &st
     let first = match geo_arr.and_then(|a| a.first()) {
         Some(v) => v,
         None => {
-            msg.reply(&format!("⚠️ No location found for zipcode {}.", zipcode)).await?;
+            super::reply(ctx, msg, &format!("⚠️ No location found for zipcode {}.", zipcode)).await?;
             return Ok(());
         }
     };
@@ -396,7 +396,7 @@ pub async fn weather_command(_ctx: &BotContext, msg: &IncomingMessage, args: &st
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Weather fetch failed: {}", e);
-            msg.reply("⚠️ Could not fetch weather data.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch weather data.").await?;
             return Ok(());
         }
     };
@@ -428,7 +428,7 @@ pub async fn weather_command(_ctx: &BotContext, msg: &IncomingMessage, args: &st
     }
     response.push_str(&format!("Conditions: {}", desc));
 
-    msg.reply(response.trim()).await?;
+    super::reply(ctx, msg, response.trim()).await?;
     Ok(())
 }
 
@@ -458,11 +458,11 @@ fn weather_code_to_emoji(code: Option<i64>) -> String {
 // !remind <time> <message> — Set a reminder (echo for now, persistence later)
 // -----------------------------------------------------------------------------
 
-pub async fn remind_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn remind_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "Usage: !remind <time> <message>\nExamples: !remind 30m Call mom, !remind 2h Check oven, !remind 1d Pay bills"
         ).await?;
         return Ok(());
@@ -471,13 +471,13 @@ pub async fn remind_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
     match parse_reminder_input(args) {
         Some((desc, message)) => {
             if message.is_empty() {
-                msg.reply("⚠️ Please provide a message after the time.\nExample: !remind 30m Call mom").await?;
+                super::reply(ctx, msg, "⚠️ Please provide a message after the time.\nExample: !remind 30m Call mom").await?;
             } else {
-                msg.reply(&format!("⏰ Reminder set: {} (in {})", message, desc)).await?;
+                super::reply(ctx, msg, &format!("⏰ Reminder set: {} (in {})", message, desc)).await?;
             }
         }
         None => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "⚠️ Could not parse time. Use: 30m, 2h, 1d, 30 minutes, 2 hours, 1 day\nExample: !remind 30m Call mom"
             ).await?;
         }
@@ -535,11 +535,11 @@ fn parse_reminder_input(input: &str) -> Option<(String, String)> {
 // !poll <question> | option1 | option2 | ... — Create a poll
 // -----------------------------------------------------------------------------
 
-pub async fn poll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn poll_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply("Usage: !poll <question> | option1 | option2 | ...\nExample: !poll Pizza? | Yes | No | Maybe").await?;
+        super::reply(ctx, msg, "Usage: !poll <question> | option1 | option2 | ...\nExample: !poll Pizza? | Yes | No | Maybe").await?;
         return Ok(());
     }
 
@@ -550,7 +550,7 @@ pub async fn poll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         .collect();
 
     if parts.len() < 3 {
-        msg.reply("⚠️ Need a question and at least 2 options.\nExample: !poll Pizza? | Yes | No").await?;
+        super::reply(ctx, msg, "⚠️ Need a question and at least 2 options.\nExample: !poll Pizza? | Yes | No").await?;
         return Ok(());
     }
 
@@ -563,7 +563,7 @@ pub async fn poll_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
     }
     response.push_str("\nReact to vote!");
 
-    msg.reply(response.trim()).await?;
+    super::reply(ctx, msg, response.trim()).await?;
     Ok(())
 }
 
@@ -588,18 +588,18 @@ fn number_emoji(n: usize) -> &'static str {
 // !translate <language> <text> — Translate text via MyMemory API
 // -----------------------------------------------------------------------------
 
-pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn translate_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply("Usage: !translate <language> <text>\nExample: !translate es Hello world").await?;
+        super::reply(ctx, msg, "Usage: !translate <language> <text>\nExample: !translate es Hello world").await?;
         return Ok(());
     }
 
     // Split: first word is language code, rest is text
     let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
     if parts.len() < 2 {
-        msg.reply("⚠️ Provide a language code and text.\nExample: !translate es Hello world").await?;
+        super::reply(ctx, msg, "⚠️ Provide a language code and text.\nExample: !translate es Hello world").await?;
         return Ok(());
     }
 
@@ -607,7 +607,7 @@ pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &
     let text = parts[1].trim();
 
     if text.is_empty() {
-        msg.reply("⚠️ Provide text to translate.\nExample: !translate es Hello world").await?;
+        super::reply(ctx, msg, "⚠️ Provide text to translate.\nExample: !translate es Hello world").await?;
         return Ok(());
     }
 
@@ -621,7 +621,7 @@ pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Translate API failed: {}", e);
-            msg.reply("⚠️ Could not translate text right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not translate text right now.").await?;
             return Ok(());
         }
     };
@@ -630,7 +630,7 @@ pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &
         .as_str()
         .unwrap_or("Could not parse translation.");
 
-    msg.reply(&format!("🌍 ({} → {}): {}", "EN", lang.to_uppercase(), translated)).await?;
+    super::reply(ctx, msg, &format!("🌍 ({} → {}): {}", "EN", lang.to_uppercase(), translated)).await?;
     Ok(())
 }
 
@@ -638,11 +638,11 @@ pub async fn translate_command(_ctx: &BotContext, msg: &IncomingMessage, args: &
 // !define <word> — Dictionary definition via Free Dictionary API
 // -----------------------------------------------------------------------------
 
-pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn define_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let word = args.trim();
 
     if word.is_empty() {
-        msg.reply("Usage: !define <word>\nExample: !define serendipity").await?;
+        super::reply(ctx, msg, "Usage: !define <word>\nExample: !define serendipity").await?;
         return Ok(());
     }
 
@@ -655,7 +655,7 @@ pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Dictionary API failed: {}", e);
-            msg.reply(&format!("⚠️ No definition found for \"{}\".", word)).await?;
+            super::reply(ctx, msg, &format!("⚠️ No definition found for \"{}\".", word)).await?;
             return Ok(());
         }
     };
@@ -664,7 +664,7 @@ pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
     let entries = match data.as_array() {
         Some(arr) if !arr.is_empty() => &arr[0],
         _ => {
-            msg.reply(&format!("⚠️ No definition found for \"{}\".", word)).await?;
+            super::reply(ctx, msg, &format!("⚠️ No definition found for \"{}\".", word)).await?;
             return Ok(());
         }
     };
@@ -703,7 +703,7 @@ pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
         response.push_str("  No definitions available.");
     }
 
-    msg.reply(response.trim()).await?;
+    super::reply(ctx, msg, response.trim()).await?;
     Ok(())
 }
 
@@ -711,14 +711,14 @@ pub async fn define_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str
 // !quote — Random inspirational quote via Quotable API
 // -----------------------------------------------------------------------------
 
-pub async fn quote_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn quote_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let url = "https://api.quotable.io/random";
 
     let data = match http::fetch_json(url).await {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Quote API failed: {}", e);
-            msg.reply("⚠️ Could not fetch a quote right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch a quote right now.").await?;
             return Ok(());
         }
     };
@@ -726,7 +726,7 @@ pub async fn quote_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<(
     let content = data["content"].as_str().unwrap_or("...");
     let author = data["author"].as_str().unwrap_or("Unknown");
 
-    msg.reply(&format!("💬 \"{}\" — {}", content, author)).await?;
+    super::reply(ctx, msg, &format!("💬 \"{}\" — {}", content, author)).await?;
     Ok(())
 }
 
@@ -734,7 +734,7 @@ pub async fn quote_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<(
 // !joke — Random dad joke via icanhazdadjoke.com
 // -----------------------------------------------------------------------------
 
-pub async fn joke_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn joke_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     // icanhazdadjoke.com requires Accept: application/json header.
     // The shared HTTP client in lib/http.rs doesn't set this, so we make
     // a one-off request with the correct header.
@@ -754,15 +754,15 @@ pub async fn joke_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
             match r.json::<serde_json::Value>().await {
                 Ok(data) => {
                     let joke = data["joke"].as_str().unwrap_or("Could not parse joke.");
-                    msg.reply(&format!("😄 {}", joke)).await?;
+                    super::reply(ctx, msg, &format!("😄 {}", joke)).await?;
                 }
                 Err(_) => {
-                    msg.reply("⚠️ Could not parse joke response.").await?;
+                    super::reply(ctx, msg, "⚠️ Could not parse joke response.").await?;
                 }
             }
         }
         _ => {
-            msg.reply("⚠️ Could not fetch a joke right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch a joke right now.").await?;
         }
     }
 
@@ -773,21 +773,21 @@ pub async fn joke_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
 // !fact — Random fun fact via Useless Facts API
 // -----------------------------------------------------------------------------
 
-pub async fn fact_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn fact_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let url = "https://uselessfacts.jsph.pl/api/v2/facts/random?language=en";
 
     let data = match http::fetch_json(url).await {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Facts API failed: {}", e);
-            msg.reply("⚠️ Could not fetch a fact right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch a fact right now.").await?;
             return Ok(());
         }
     };
 
     let fact = data["text"].as_str().unwrap_or("Could not parse fact.");
 
-    msg.reply(&format!("🧠 {}", fact)).await?;
+    super::reply(ctx, msg, &format!("🧠 {}", fact)).await?;
     Ok(())
 }
 
@@ -795,14 +795,14 @@ pub async fn fact_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
 // !meme — Random meme via meme-api.com
 // -----------------------------------------------------------------------------
 
-pub async fn meme_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn meme_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let url = "https://meme-api.com/gimme";
 
     let data = match http::fetch_json(url).await {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("Meme API failed: {}", e);
-            msg.reply("⚠️ Could not fetch a meme right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch a meme right now.").await?;
             return Ok(());
         }
     };
@@ -819,7 +819,7 @@ pub async fn meme_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
         response.push_str(&format!("\n{}", meme_url));
     }
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -827,17 +827,17 @@ pub async fn meme_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
 // !shorten <url> — URL shortener via is.gd
 // -----------------------------------------------------------------------------
 
-pub async fn shorten_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn shorten_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let url = args.trim();
 
     if url.is_empty() {
-        msg.reply("Usage: !shorten <url>\nExample: !shorten https://example.com/very/long/url").await?;
+        super::reply(ctx, msg, "Usage: !shorten <url>\nExample: !shorten https://example.com/very/long/url").await?;
         return Ok(());
     }
 
     // Basic URL validation
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        msg.reply("⚠️ URL must start with http:// or https://").await?;
+        super::reply(ctx, msg, "⚠️ URL must start with http:// or https://").await?;
         return Ok(());
     }
 
@@ -850,20 +850,20 @@ pub async fn shorten_command(_ctx: &BotContext, msg: &IncomingMessage, args: &st
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("is.gd API failed: {}", e);
-            msg.reply("⚠️ Could not shorten URL right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not shorten URL right now.").await?;
             return Ok(());
         }
     };
 
     // Check for error response
     if let Some(err_msg) = data["errormessage"].as_str() {
-        msg.reply(&format!("⚠️ {}", err_msg)).await?;
+        super::reply(ctx, msg, &format!("⚠️ {}", err_msg)).await?;
         return Ok(());
     }
 
     let short = data["shorturl"].as_str().unwrap_or("Could not parse response.");
 
-    msg.reply(&format!("🔗 {}", short)).await?;
+    super::reply(ctx, msg, &format!("🔗 {}", short)).await?;
     Ok(())
 }
 

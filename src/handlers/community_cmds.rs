@@ -103,7 +103,7 @@ pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) 
     };
 
     if target_npub.is_empty() {
-        msg.reply("⚠️ Could not determine your npub.").await?;
+        super::reply(ctx, msg, "⚠️ Could not determine your npub.").await?;
         return Ok(());
     }
 
@@ -111,7 +111,7 @@ pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("Community DB error: {}", e);
-            msg.reply("⚠️ Could not retrieve level data.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve level data.").await?;
             return Ok(());
         }
     };
@@ -132,7 +132,7 @@ pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         display, level, xp_in_level, xp_needed, xp_remaining
     );
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -145,13 +145,13 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
         Ok(e) => e,
         Err(e) => {
             tracing::warn!("Community DB error: {}", e);
-            msg.reply("⚠️ Could not retrieve leaderboard.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve leaderboard.").await?;
             return Ok(());
         }
     };
 
     if entries.is_empty() {
-        msg.reply("🏆 Leaderboard is empty. Start chatting to earn XP!").await?;
+        super::reply(ctx, msg, "🏆 Leaderboard is empty. Start chatting to earn XP!").await?;
         return Ok(());
     }
 
@@ -172,7 +172,7 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
         ));
     }
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
@@ -188,7 +188,7 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     };
 
     if target_npub.is_empty() {
-        msg.reply("⚠️ Could not determine your npub.").await?;
+        super::reply(ctx, msg, "⚠️ Could not determine your npub.").await?;
         return Ok(());
     }
 
@@ -196,7 +196,7 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("Community DB error: {}", e);
-            msg.reply("⚠️ Could not retrieve profile.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve profile.").await?;
             return Ok(());
         }
     };
@@ -224,7 +224,7 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         stats.rep
     );
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 
@@ -236,7 +236,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "Usage: !giveaway <duration> <prize>\n\
              Or: !giveaway end | !giveaway list\n\
              Examples: !giveaway 10m 50 sats, !giveaway 1h Premium codes x3",
@@ -256,7 +256,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
     // Parse: <duration> <prize>
     let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();
     if parts.len() < 2 {
-        msg.reply(
+        super::reply(ctx, msg, 
             "⚠️ Please provide both duration and prize.\n\
              Example: !giveaway 10m 50 sats",
         )
@@ -270,7 +270,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
     let duration_secs = match parse_duration(duration_str) {
         Some(d) => d,
         None => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚠️ Could not parse duration \"{}\". Use: 10m, 1h, 30m",
                 duration_str
             ))
@@ -280,7 +280,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
     };
 
     if duration_secs < 60 || duration_secs > 86400 {
-        msg.reply("⚠️ Duration must be between 1 minute and 24 hours.").await?;
+        super::reply(ctx, msg, "⚠️ Duration must be between 1 minute and 24 hours.").await?;
         return Ok(());
     }
 
@@ -319,7 +319,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
         ends_at,
     ) {
         tracing::warn!("Failed to create giveaway: {}", e);
-        msg.reply("⚠️ Could not create giveaway.").await?;
+        super::reply(ctx, msg, "⚠️ Could not create giveaway.").await?;
         return Ok(());
     }
 
@@ -330,7 +330,7 @@ pub async fn giveaway_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
         prize_str, ends_human
     );
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
 
     tracing::info!(
         "Giveaway {} created in channel {} by {}, ends at {}",
@@ -397,13 +397,13 @@ async fn giveaway_end_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
         Ok(g) => g,
         Err(e) => {
             tracing::warn!("Failed to get active giveaways: {}", e);
-            msg.reply("⚠️ Could not check active giveaways.").await?;
+            super::reply(ctx, msg, "⚠️ Could not check active giveaways.").await?;
             return Ok(());
         }
     };
 
     if active.is_empty() {
-        msg.reply("ℹ️ No active giveaways in this channel.").await?;
+        super::reply(ctx, msg, "ℹ️ No active giveaways in this channel.").await?;
         return Ok(());
     }
 
@@ -429,7 +429,7 @@ async fn giveaway_end_command(ctx: &BotContext, msg: &IncomingMessage) -> Result
         }
     }
 
-    msg.reply(&results.join("\n")).await?;
+    super::reply(ctx, msg, &results.join("\n")).await?;
     Ok(())
 }
 
@@ -439,13 +439,13 @@ async fn giveaway_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Resul
         Ok(g) => g,
         Err(e) => {
             tracing::warn!("Failed to get active giveaways: {}", e);
-            msg.reply("⚠️ Could not retrieve giveaways.").await?;
+            super::reply(ctx, msg, "⚠️ Could not retrieve giveaways.").await?;
             return Ok(());
         }
     };
 
     if active.is_empty() {
-        msg.reply("📦 No active giveaways right now.").await?;
+        super::reply(ctx, msg, "📦 No active giveaways right now.").await?;
         return Ok(());
     }
 
@@ -466,7 +466,7 @@ async fn giveaway_list_command(ctx: &BotContext, msg: &IncomingMessage) -> Resul
         ));
     }
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
@@ -480,31 +480,31 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let target_npub = if args.trim().is_empty() {
         // Show own rep
         if sender.is_empty() {
-            msg.reply("⚠️ Could not determine your npub.").await?;
+            super::reply(ctx, msg, "⚠️ Could not determine your npub.").await?;
             return Ok(());
         }
         let stats = match ctx.community_db.get_user(&sender) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("Community DB error: {}", e);
-                msg.reply("⚠️ Could not retrieve reputation.").await?;
+                super::reply(ctx, msg, "⚠️ Could not retrieve reputation.").await?;
                 return Ok(());
             }
         };
-        msg.reply(&format!("⭐ Your reputation: {}", stats.rep)).await?;
+        super::reply(ctx, msg, &format!("⭐ Your reputation: {}", stats.rep)).await?;
         return Ok(());
     } else {
         normalize_npub(args)
     };
 
     if sender.is_empty() {
-        msg.reply("⚠️ Could not determine your npub.").await?;
+        super::reply(ctx, msg, "⚠️ Could not determine your npub.").await?;
         return Ok(());
     }
 
     // Can't rep yourself
     if sender == target_npub {
-        msg.reply("⚠️ You can't give reputation to yourself!").await?;
+        super::reply(ctx, msg, "⚠️ You can't give reputation to yourself!").await?;
         return Ok(());
     }
 
@@ -539,17 +539,17 @@ pub async fn rep_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
                 reply.push_str(&format!("\n🎉 nostr:{} reached Level {}!", target_npub, new_level));
             }
 
-            msg.reply(&reply).await?;
+            super::reply(ctx, msg, &reply).await?;
         }
         Ok(false) => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "⏰ You've already given rep to this person recently. Try again in 24 hours.",
             )
             .await?;
         }
         Err(e) => {
             tracing::warn!("Rep failed: {}", e);
-            msg.reply("⚠️ Could not give reputation right now.").await?;
+            super::reply(ctx, msg, "⚠️ Could not give reputation right now.").await?;
         }
     }
 
@@ -586,14 +586,14 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
                 if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
-                    msg.reply("⛔ Owner only.").await?;
+                    super::reply(ctx, msg, "⛔ Owner only.").await?;
                     return Ok(());
                 }
             }
 
             let name = rest.trim();
             if name.is_empty() {
-                msg.reply("Usage: !community create <name>").await?;
+                super::reply(ctx, msg, "Usage: !community create <name>").await?;
                 return Ok(());
             }
 
@@ -603,11 +603,11 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
                         .get("community_id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("?");
-                    msg.reply(&format!("✅ Created v2 community: {}\n🆔 ID: {}", name, id)).await?;
+                    super::reply(ctx, msg, &format!("✅ Created v2 community: {}\n🆔 ID: {}", name, id)).await?;
                     tracing::info!("Created v2 community '{}' with ID {}", name, id);
                 }
                 Err(e) => {
-                    msg.reply(&format!("⚠️ Failed to create community: {}", e)).await?;
+                    super::reply(ctx, msg, &format!("⚠️ Failed to create community: {}", e)).await?;
                     tracing::error!("Failed to create v2 community: {:?}", e);
                 }
             }
@@ -617,7 +617,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             let community = match msg.community() {
                 Some(c) => c,
                 None => {
-                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
                     return Ok(());
                 }
             };
@@ -655,7 +655,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
                 info.push_str(&format!("\n🎭 Roles: {}", format_json_value(roles, 200)));
             }
 
-            msg.reply(&info).await?;
+            super::reply(ctx, msg, &info).await?;
         }
 
         "leave" => {
@@ -663,7 +663,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
                 if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
-                    msg.reply("⛔ Owner only.").await?;
+                    super::reply(ctx, msg, "⛔ Owner only.").await?;
                     return Ok(());
                 }
             }
@@ -671,7 +671,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             let community = match msg.community() {
                 Some(c) => c,
                 None => {
-                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
                     return Ok(());
                 }
             };
@@ -679,11 +679,11 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             let id = community.id().to_string();
             match community.leave().await {
                 Ok(()) => {
-                    msg.reply(&format!("👋 Left community {}", id)).await?;
+                    super::reply(ctx, msg, &format!("👋 Left community {}", id)).await?;
                     tracing::info!("Left community {}", id);
                 }
                 Err(e) => {
-                    msg.reply(&format!("⚠️ Failed to leave community: {}", e)).await?;
+                    super::reply(ctx, msg, &format!("⚠️ Failed to leave community: {}", e)).await?;
                 }
             }
         }
@@ -693,7 +693,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             if let Some(ref auth) = ctx.auth {
                 let npub = msg.message.npub.clone().unwrap_or_default();
                 if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Owner) {
-                    msg.reply("⛔ Owner only.").await?;
+                    super::reply(ctx, msg, "⛔ Owner only.").await?;
                     return Ok(());
                 }
             }
@@ -701,7 +701,7 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             let community = match msg.community() {
                 Some(c) => c,
                 None => {
-                    msg.reply("⚠️ This command can only be used in a community channel.").await?;
+                    super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
                     return Ok(());
                 }
             };
@@ -709,17 +709,17 @@ pub async fn v2_community_command(ctx: &BotContext, msg: &IncomingMessage, args:
             let id = community.id().to_string();
             match community.dissolve().await {
                 Ok(()) => {
-                    msg.reply(&format!("💀 Community {} has been dissolved. This is irreversible!", id)).await?;
+                    super::reply(ctx, msg, &format!("💀 Community {} has been dissolved. This is irreversible!", id)).await?;
                     tracing::warn!("Dissolved community {}", id);
                 }
                 Err(e) => {
-                    msg.reply(&format!("⚠️ Failed to dissolve community: {}", e)).await?;
+                    super::reply(ctx, msg, &format!("⚠️ Failed to dissolve community: {}", e)).await?;
                 }
             }
         }
 
         _ => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "Usage: !community <create|info|leave|dissolve>\n\
                  • create <name> — Create a new v2 community (Owner)\n\
                  • info — Show community details\n\
@@ -739,7 +739,7 @@ pub async fn v2_invite_command(ctx: &BotContext, msg: &IncomingMessage, args: &s
     if let Some(ref auth) = ctx.auth {
         let npub = msg.message.npub.clone().unwrap_or_default();
         if !auth.has_permission(&npub, msg.community().map(|c| c.id().to_string()).as_deref(), AuthLevel::Authorized) {
-            msg.reply("⛔ Not authorized. Ask the owner to run !add <your-npub>").await?;
+            super::reply(ctx, msg, "⛔ Not authorized. Ask the owner to run !add <your-npub>").await?;
             return Ok(());
         }
     }
@@ -747,7 +747,7 @@ pub async fn v2_invite_command(ctx: &BotContext, msg: &IncomingMessage, args: &s
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
             return Ok(());
         }
     };
@@ -758,28 +758,28 @@ pub async fn v2_invite_command(ctx: &BotContext, msg: &IncomingMessage, args: &s
         // Create a shareable invite link
         match community.create_invite().await {
             Ok(link) => {
-                msg.reply(&format!("🔗 Invite link: {}", link)).await?;
+                super::reply(ctx, msg, &format!("🔗 Invite link: {}", link)).await?;
                 tracing::info!("Created invite link for community {}", community.id());
             }
             Err(e) => {
-                msg.reply(&format!("⚠️ Failed to create invite: {}", e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Failed to create invite: {}", e)).await?;
             }
         }
     } else {
         // Direct invite by npub
         let npub = normalize_npub(target);
         if npub.is_empty() || !npub.starts_with("npub1") {
-            msg.reply("⚠️ Invalid npub. Usage: !invite <npub1...>").await?;
+            super::reply(ctx, msg, "⚠️ Invalid npub. Usage: !invite <npub1...>").await?;
             return Ok(());
         }
 
         match community.invite(&npub).await {
             Ok(()) => {
-                msg.reply(&format!("✅ Invited {} to this community.", npub)).await?;
+                super::reply(ctx, msg, &format!("✅ Invited {} to this community.", npub)).await?;
                 tracing::info!("Invited {} to community {}", npub, community.id());
             }
             Err(e) => {
-                msg.reply(&format!("⚠️ Failed to invite {}: {}", npub, e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Failed to invite {}: {}", npub, e)).await?;
             }
         }
     }
@@ -792,7 +792,7 @@ pub async fn v2_join_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let link = args.trim();
 
     if link.is_empty() {
-        msg.reply("Usage: !join <invite_link>").await?;
+        super::reply(ctx, msg, "Usage: !join <invite_link>").await?;
         return Ok(());
     }
 
@@ -802,11 +802,11 @@ pub async fn v2_join_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
                 .get("community_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            msg.reply(&format!("✅ Joined community: {}", id)).await?;
+            super::reply(ctx, msg, &format!("✅ Joined community: {}", id)).await?;
             tracing::info!("Joined community via invite: {:?}", summary);
         }
         Err(e) => {
-            msg.reply(&format!("⚠️ Failed to join community: {}", e)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Failed to join community: {}", e)).await?;
             tracing::error!("Failed to join community via {}: {:?}", link, e);
         }
     }
@@ -815,11 +815,11 @@ pub async fn v2_join_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
 }
 
 /// !members — List community members
-pub async fn v2_members_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn v2_members_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
             return Ok(());
         }
     };
@@ -827,7 +827,7 @@ pub async fn v2_members_command(_ctx: &BotContext, msg: &IncomingMessage) -> Res
     let members = community.members().await;
 
     if members.is_empty() {
-        msg.reply("📦 No members found.").await?;
+        super::reply(ctx, msg, "📦 No members found.").await?;
         return Ok(());
     }
 
@@ -841,7 +841,7 @@ pub async fn v2_members_command(_ctx: &BotContext, msg: &IncomingMessage) -> Res
         lines.push(format!("  ... and {} more", members.len() - 50));
     }
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
@@ -850,7 +850,7 @@ pub async fn v2_channels_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
     let communities_list = ctx.bot.core().list_communities().await;
 
     if communities_list.is_empty() {
-        msg.reply("📦 No communities found.").await?;
+        super::reply(ctx, msg, "📦 No communities found.").await?;
         return Ok(());
     }
 
@@ -891,26 +891,26 @@ pub async fn v2_channels_command(ctx: &BotContext, msg: &IncomingMessage) -> Res
         lines.push("No channels found.".to_string());
     }
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
 /// !roles — Show community roles
-pub async fn v2_roles_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn v2_roles_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
             return Ok(());
         }
     };
 
     match community.roles() {
         Ok(roles) => {
-            msg.reply(&format!("🎭 **Roles**\n{}", format_json_value(&roles, 500))).await?;
+            super::reply(ctx, msg, &format!("🎭 **Roles**\n{}", format_json_value(&roles, 500))).await?;
         }
         Err(e) => {
-            msg.reply(&format!("⚠️ Failed to retrieve roles: {}", e)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Failed to retrieve roles: {}", e)).await?;
         }
     }
 
@@ -918,21 +918,21 @@ pub async fn v2_roles_command(_ctx: &BotContext, msg: &IncomingMessage) -> Resul
 }
 
 /// !caps — Show community capabilities
-pub async fn v2_caps_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn v2_caps_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.").await?;
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.").await?;
             return Ok(());
         }
     };
 
     match community.capabilities() {
         Ok(caps) => {
-            msg.reply(&format!("⚡ **Capabilities**\n{}", format_json_value(&caps, 500))).await?;
+            super::reply(ctx, msg, &format!("⚡ **Capabilities**\n{}", format_json_value(&caps, 500))).await?;
         }
         Err(e) => {
-            msg.reply(&format!("⚠️ Failed to retrieve capabilities: {}", e)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Failed to retrieve capabilities: {}", e)).await?;
         }
     }
 

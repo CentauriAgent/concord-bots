@@ -38,12 +38,12 @@ const EIGHT_BALL_RESPONSES: &[&str] = &[
 ];
 
 pub async fn eight_ball_command(
-    _ctx: &BotContext,
+    ctx: &BotContext,
     msg: &IncomingMessage,
     args: &str,
 ) -> Result<()> {
     if args.trim().is_empty() {
-        msg.reply("🎱 Usage: !8ball <question>").await?;
+        super::reply(ctx, msg, "🎱 Usage: !8ball <question>").await?;
         return Ok(());
     }
 
@@ -52,7 +52,7 @@ pub async fn eight_ball_command(
         .choose(&mut rand::thread_rng())
         .unwrap_or(&"Maybe.");
 
-    msg.reply(&format!("🎱 {}", response)).await?;
+    super::reply(ctx, msg, &format!("🎱 {}", response)).await?;
     Ok(())
 }
 
@@ -60,14 +60,14 @@ pub async fn eight_ball_command(
 // !flip — Coin flip
 // -----------------------------------------------------------------------------
 
-pub async fn flip_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
+pub async fn flip_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     use rand::Rng;
     let result = if rand::thread_rng().gen_bool(0.5) {
         "🪙 Heads!"
     } else {
         "🪙 Tails!"
     };
-    msg.reply(result).await?;
+    super::reply(ctx, msg, result).await?;
     Ok(())
 }
 
@@ -76,14 +76,14 @@ pub async fn flip_command(_ctx: &BotContext, msg: &IncomingMessage) -> Result<()
 // -----------------------------------------------------------------------------
 
 pub async fn choose_command(
-    _ctx: &BotContext,
+    ctx: &BotContext,
     msg: &IncomingMessage,
     args: &str,
 ) -> Result<()> {
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply("Usage: !choose <option1 | option2 | option3>\nExample: !choose pizza | tacos | sushi").await?;
+        super::reply(ctx, msg, "Usage: !choose <option1 | option2 | option3>\nExample: !choose pizza | tacos | sushi").await?;
         return Ok(());
     }
 
@@ -95,7 +95,7 @@ pub async fn choose_command(
         .collect();
 
     if options.len() < 2 {
-        msg.reply("⚠️ Give me at least 2 options separated by |").await?;
+        super::reply(ctx, msg, "⚠️ Give me at least 2 options separated by |").await?;
         return Ok(());
     }
 
@@ -104,7 +104,7 @@ pub async fn choose_command(
         .choose(&mut rand::thread_rng())
         .unwrap_or(&"???");
 
-    msg.reply(&format!("🤔 I choose: **{}**", choice)).await?;
+    super::reply(ctx, msg, &format!("🤔 I choose: **{}**", choice)).await?;
     Ok(())
 }
 
@@ -113,7 +113,7 @@ pub async fn choose_command(
 // -----------------------------------------------------------------------------
 
 pub async fn rps_command(
-    _ctx: &BotContext,
+    ctx: &BotContext,
     msg: &IncomingMessage,
     args: &str,
 ) -> Result<()> {
@@ -124,7 +124,7 @@ pub async fn rps_command(
         "paper" | "p" => "paper",
         "scissors" | "s" => "scissors",
         _ => {
-            msg.reply("Usage: !rps <rock|paper|scissors>\nYou can also use: r, p, s").await?;
+            super::reply(ctx, msg, "Usage: !rps <rock|paper|scissors>\nYou can also use: r, p, s").await?;
             return Ok(());
         }
     };
@@ -159,7 +159,7 @@ pub async fn rps_command(
         ),
     };
 
-    msg.reply(&response).await?;
+    super::reply(ctx, msg, &response).await?;
     Ok(())
 }
 

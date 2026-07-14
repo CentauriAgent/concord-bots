@@ -45,7 +45,7 @@ pub async fn balance_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<
     let wallet = match get_wallet(ctx) {
         Some(w) => w,
         None => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "💰 Wallet not initialized. Ask the bot owner to enable the Cashu wallet in bot.toml.\n\
                  See `!help` for available commands.",
             )
@@ -65,11 +65,11 @@ pub async fn balance_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<
                 .split('/')
                 .next()
                 .unwrap_or(mint);
-            msg.reply(&format!("💰 Wallet: {} sats ({})", sats, mint_display)).await?;
+            super::reply(ctx, msg, &format!("💰 Wallet: {} sats ({})", sats, mint_display)).await?;
         }
         Err(e) => {
             tracing::warn!("Balance check failed: {:?}", e);
-            msg.reply("⚠️ Could not check wallet balance. The mint may be unreachable.").await?;
+            super::reply(ctx, msg, "⚠️ Could not check wallet balance. The mint may be unreachable.").await?;
         }
     }
 
@@ -84,14 +84,14 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let wallet = match get_wallet(ctx) {
         Some(w) => w,
         None => {
-            msg.reply("💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
+            super::reply(ctx, msg, "💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
             return Ok(());
         }
     };
 
     let args = args.trim();
     if args.is_empty() {
-        msg.reply("Usage: !tip <sats> [memo]\nExample: !tip 21 Thanks for the help!").await?;
+        super::reply(ctx, msg, "Usage: !tip <sats> [memo]\nExample: !tip 21 Thanks for the help!").await?;
         return Ok(());
     }
 
@@ -100,7 +100,7 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let sats: u64 = match parts[0].parse() {
         Ok(n) if n > 0 => n,
         _ => {
-            msg.reply("⚠️ Please provide a valid positive number of sats.\nExample: !tip 21").await?;
+            super::reply(ctx, msg, "⚠️ Please provide a valid positive number of sats.\nExample: !tip 21").await?;
             return Ok(());
         }
     };
@@ -114,7 +114,7 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             } else {
                 format!("💸 {} sats up for grabs: {}", sats, token)
             };
-            msg.reply(&response).await?;
+            super::reply(ctx, msg, &response).await?;
 
             // Community XP: sender gets +5 XP for tipping
             if let Some(ref sender_npub) = msg.message.npub {
@@ -129,13 +129,13 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Err(e) => {
             let msg_text = format!("{:?}", e);
             if msg_text.contains("Insufficient") {
-                msg.reply(&format!(
+                super::reply(ctx, msg, &format!(
                     "❌ Insufficient balance for a {} sat tip. Use !deposit to add funds.",
                     sats
                 )).await?;
             } else {
                 tracing::warn!("Tip failed: {:?}", e);
-                msg.reply("⚠️ Could not create tip. The mint may be unreachable.").await?;
+                super::reply(ctx, msg, "⚠️ Could not create tip. The mint may be unreachable.").await?;
             }
         }
     }
@@ -151,7 +151,7 @@ pub async fn deposit_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let wallet = match get_wallet(ctx) {
         Some(w) => w,
         None => {
-            msg.reply("💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
+            super::reply(ctx, msg, "💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
             return Ok(());
         }
     };
@@ -163,27 +163,27 @@ pub async fn deposit_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
         match args.parse() {
             Ok(n) if n > 0 => n,
             _ => {
-                msg.reply("Usage: !deposit [sats]\nExample: !deposit 1000").await?;
+                super::reply(ctx, msg, "Usage: !deposit [sats]\nExample: !deposit 1000").await?;
                 return Ok(());
             }
         }
     };
 
     if sats < 100 {
-        msg.reply("⚠️ Minimum deposit is 100 sats.").await?;
+        super::reply(ctx, msg, "⚠️ Minimum deposit is 100 sats.").await?;
         return Ok(());
     }
 
     match wallet.deposit(sats).await {
         Ok((_quote_id, invoice)) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚡ Deposit {} sats:\n{}\n\nPay the invoice to fund the wallet.",
                 sats, invoice
             )).await?;
         }
         Err(e) => {
             tracing::warn!("Deposit quote failed: {:?}", e);
-            msg.reply("⚠️ Could not generate deposit invoice. The mint may be unreachable.").await?;
+            super::reply(ctx, msg, "⚠️ Could not generate deposit invoice. The mint may be unreachable.").await?;
         }
     }
 
@@ -198,36 +198,36 @@ pub async fn withdraw_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
     let wallet = match get_wallet(ctx) {
         Some(w) => w,
         None => {
-            msg.reply("💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
+            super::reply(ctx, msg, "💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
             return Ok(());
         }
     };
 
     let invoice = args.trim();
     if invoice.is_empty() {
-        msg.reply("Usage: !withdraw <invoice>\nExample: !withdraw lnbc10u1p3...").await?;
+        super::reply(ctx, msg, "Usage: !withdraw <invoice>\nExample: !withdraw lnbc10u1p3...").await?;
         return Ok(());
     }
 
     if !invoice.starts_with("lnbc") {
-        msg.reply("⚠️ That doesn't look like a Lightning invoice. Invoices start with \"lnbc\".").await?;
+        super::reply(ctx, msg, "⚠️ That doesn't look like a Lightning invoice. Invoices start with \"lnbc\".").await?;
         return Ok(());
     }
 
     // Let the user know this may take a moment
-    msg.reply("⏳ Processing payment...").await?;
+    super::reply(ctx, msg, "⏳ Processing payment...").await?;
 
     match wallet.withdraw(invoice).await {
         Ok(amount_paid) => {
-            msg.reply(&format!("✅ Paid {} sats!", amount_paid)).await?;
+            super::reply(ctx, msg, &format!("✅ Paid {} sats!", amount_paid)).await?;
         }
         Err(e) => {
             let msg_text = format!("{:?}", e);
             if msg_text.contains("Insufficient") {
-                msg.reply("❌ Insufficient balance to pay this invoice. Use !deposit to add funds.").await?;
+                super::reply(ctx, msg, "❌ Insufficient balance to pay this invoice. Use !deposit to add funds.").await?;
             } else {
                 tracing::warn!("Withdraw failed: {:?}", e);
-                msg.reply("⚠️ Could not pay invoice. It may be expired, invalid, or the mint is unreachable.").await?;
+                super::reply(ctx, msg, "⚠️ Could not pay invoice. It may be expired, invalid, or the mint is unreachable.").await?;
             }
         }
     }
@@ -250,7 +250,7 @@ pub async fn withdraw_command(ctx: &BotContext, msg: &IncomingMessage, args: &st
 pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let args = args.trim();
     if args.is_empty() {
-        msg.reply(
+        super::reply(ctx, msg, 
             "Usage: !zap <npub> <sats> [message]\nExample: !zap npub1jrvd... 21 Great post!"
         ).await?;
         return Ok(());
@@ -264,7 +264,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
 
     // Validate npub format
     if !npub_input.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
@@ -272,7 +272,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let sats: u64 = match sats_str.parse() {
         Ok(n) if n > 0 => n,
         _ => {
-            msg.reply(
+            super::reply(ctx, msg, 
                 "⚠️ Please provide a valid positive number of sats.\nExample: !zap npub1... 21"
             ).await?;
             return Ok(());
@@ -283,7 +283,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let wallet = match get_wallet(ctx) {
         Some(w) => w,
         None => {
-            msg.reply("💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
+            super::reply(ctx, msg, "💰 Wallet not initialized. Ask the bot owner to enable it.").await?;
             return Ok(());
         }
     };
@@ -292,20 +292,20 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let nsec = match ctx.config.bot_nsec() {
         Some(k) => k,
         None => {
-            msg.reply("⚠️ Bot does not have an nsec configured. Cannot create zap requests.").await?;
+            super::reply(ctx, msg, "⚠️ Bot does not have an nsec configured. Cannot create zap requests.").await?;
             return Ok(());
         }
     };
 
     // Let user know it's processing (this takes several network calls)
-    msg.reply("⚡ Creating NIP-57 zap...").await?;
+    super::reply(ctx, msg, "⚡ Creating NIP-57 zap...").await?;
 
     // -- Step 1: Resolve npub → hex pubkey --
     let hex_pubkey = match resolve_hex_pubkey(&npub_input).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve npub {}: {}", npub_input, e);
-            msg.reply(&format!("⚠️ Could not resolve npub \"{}\".", npub_input)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Could not resolve npub \"{}\".", npub_input)).await?;
             return Ok(());
         }
     };
@@ -314,12 +314,12 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let lud16 = match fetch_lud16(&hex_pubkey).await {
         Ok(Some(l)) => l,
         Ok(None) => {
-            msg.reply("⚠️ Recipient doesn't have a Lightning address configured.").await?;
+            super::reply(ctx, msg, "⚠️ Recipient doesn't have a Lightning address configured.").await?;
             return Ok(());
         }
         Err(e) => {
             tracing::warn!("Failed to fetch profile for {}: {}", hex_pubkey, e);
-            msg.reply("⚠️ Couldn't fetch recipient's Nostr profile. Try again later.").await?;
+            super::reply(ctx, msg, "⚠️ Couldn't fetch recipient's Nostr profile. Try again later.").await?;
             return Ok(());
         }
     };
@@ -328,7 +328,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let (user, domain) = match lud16.split_once('@') {
         Some((u, d)) if !u.is_empty() && !d.is_empty() => (u, d),
         _ => {
-            msg.reply("⚠️ Recipient has an invalid Lightning address.").await?;
+            super::reply(ctx, msg, "⚠️ Recipient has an invalid Lightning address.").await?;
             return Ok(());
         }
     };
@@ -339,21 +339,21 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("LNURL fetch failed for {}: {}", lud16, e);
-            msg.reply("⚠️ Couldn't reach recipient's Lightning service.").await?;
+            super::reply(ctx, msg, "⚠️ Couldn't reach recipient's Lightning service.").await?;
             return Ok(());
         }
     };
 
     // Verify the service supports Nostr zaps
     if lnurl_data["allowsNostr"].as_bool() != Some(true) {
-        msg.reply("⚠️ Recipient's Lightning service doesn't support Nostr zaps.").await?;
+        super::reply(ctx, msg, "⚠️ Recipient's Lightning service doesn't support Nostr zaps.").await?;
         return Ok(());
     }
 
     let callback = match lnurl_data["callback"].as_str() {
         Some(c) => c.to_string(),
         None => {
-            msg.reply("⚠️ Recipient's Lightning service is misconfigured (no callback URL).").await?;
+            super::reply(ctx, msg, "⚠️ Recipient's Lightning service is misconfigured (no callback URL).").await?;
             return Ok(());
         }
     };
@@ -378,7 +378,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Failed to create zap request: {}", e);
-            msg.reply("⚠️ Failed to create signed zap request.").await?;
+            super::reply(ctx, msg, "⚠️ Failed to create signed zap request.").await?;
             return Ok(());
         }
     };
@@ -394,7 +394,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("LNURL callback failed: {}", e);
-            msg.reply("⚠️ Couldn't get invoice from recipient's Lightning service.").await?;
+            super::reply(ctx, msg, "⚠️ Couldn't get invoice from recipient's Lightning service.").await?;
             return Ok(());
         }
     };
@@ -402,7 +402,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     let bolt11 = match invoice_data["pr"].as_str() {
         Some(p) if !p.is_empty() => p.to_string(),
         _ => {
-            msg.reply("⚠️ Lightning service didn't return an invoice.").await?;
+            super::reply(ctx, msg, "⚠️ Lightning service didn't return an invoice.").await?;
             return Ok(());
         }
     };
@@ -410,7 +410,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
     // -- Step 7: Pay the invoice from the Cashu wallet --
     match wallet.withdraw(&bolt11).await {
         Ok(_) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "⚡ Zapped {} {} sats! (NIP-57 receipt published by recipient's service)",
                 &npub_input, sats
             )).await?;
@@ -433,13 +433,13 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             let err_text = format!("{:?}", e);
             if err_text.contains("Insufficient") {
                 let balance = wallet.balance().await.unwrap_or(0);
-                msg.reply(&format!(
+                super::reply(ctx, msg, &format!(
                     "❌ Not enough sats in wallet. Current balance: {} sats",
                     balance
                 )).await?;
             } else {
                 tracing::warn!("Zap payment failed: {:?}", e);
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ Could not pay the Lightning invoice. The mint may be unreachable."
                 ).await?;
             }

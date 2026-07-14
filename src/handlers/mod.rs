@@ -92,11 +92,29 @@ pub mod community_cmds;
 pub mod fun;
 pub mod git_cmds;
 pub mod scheduled;
+pub mod thread;
 pub mod utility;
 pub mod wallet_cmds;
 pub mod nostr_cmds;
 pub mod moderation_cmds;
 pub mod ai_bridge;
+
+/// Send a command response reply.
+///
+/// When `features.thread_replies` is enabled (default), the response is sent
+/// as a kind 1111 threaded reply. Otherwise, it falls back to a regular
+/// `msg.reply()` (kind 9 inline reply).
+///
+/// Call this instead of `msg.reply()` in command handlers for consistent
+/// threading behavior across the bot.
+pub async fn reply(ctx: &BotContext, msg: &vector_sdk::IncomingMessage, text: &str) -> anyhow::Result<()> {
+    if ctx.config.features.thread_replies {
+        thread::reply_as_thread(ctx, msg, text).await
+    } else {
+        msg.reply(text).await?;
+        Ok(())
+    }
+}
 
 /// Called once at startup. Register scheduled tasks and any one-time setup here.
 ///

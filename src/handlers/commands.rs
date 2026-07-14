@@ -70,7 +70,7 @@ async fn require_auth(ctx: &BotContext, msg: &IncomingMessage, level: AuthLevel)
         }
         AuthLevel::Public => unreachable!("Public level should never be checked"),
     };
-    if let Err(e) = msg.reply(&response).await {
+    if let Err(e) = super::reply(ctx, msg, &response).await {
         tracing::error!("Failed to send auth denial reply: {:?}", e);
     }
     Ok(false)
@@ -125,7 +125,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     match ctx.rate_limiter.check(user_key, command).await {
         RateLimitResult::Allow => {}
         RateLimitResult::Deny(reason) => {
-            msg.reply(&reason).await?;
+            super::reply(ctx, msg, &reason).await?;
             return Ok(());
         }
     }
@@ -138,11 +138,11 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         // =====================================================================
 
         "!ping" => {
-            msg.reply("pong 🏓").await?;
+            super::reply(ctx, msg, "pong 🏓").await?;
         }
 
         "!repo" => {
-            msg.reply("📦 concord-bots\nhttps://github.com/CentauriAgent/concord-bots\n\nClone it, build your own bot, join the fleet! 🚢").await?;
+            super::reply(ctx, msg, "📦 concord-bots\nhttps://github.com/CentauriAgent/concord-bots\n\nClone it, build your own bot, join the fleet! 🚢").await?;
         }
 
         "!help" => {
@@ -163,17 +163,17 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
                 }
             };
             if should_show {
-                msg.reply(&help_text(&ctx.config.features)).await?;
+                super::reply(ctx, msg, &help_text(&ctx.config.features)).await?;
             } else {
-                msg.reply("ℹ️ Help was recently shown in this channel. Try again in a few minutes.").await?;
+                super::reply(ctx, msg, "ℹ️ Help was recently shown in this channel. Try again in a few minutes.").await?;
             }
         }
 
         "!echo" => {
             if args.is_empty() {
-                msg.reply("Usage: !echo <text>").await?;
+                super::reply(ctx, msg, "Usage: !echo <text>").await?;
             } else {
-                msg.reply(args).await?;
+                super::reply(ctx, msg, args).await?;
             }
         }
 
@@ -184,7 +184,7 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
                 npub,
                 env!("CARGO_PKG_VERSION")
             );
-            msg.reply(&info).await?;
+            super::reply(ctx, msg, &info).await?;
         }
 
         "!auth" => {
@@ -351,12 +351,12 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
                 "off" => { crate::handlers::set_welcome_enabled(false); false }
                 _ => {
                     let state = if crate::handlers::is_welcome_enabled() { "on" } else { "off" };
-                    msg.reply(&format!("Welcome messages are currently **{}**. Usage: !welcome on/off", state)).await?;
+                    super::reply(ctx, msg, &format!("Welcome messages are currently **{}**. Usage: !welcome on/off", state)).await?;
                     return Ok(());
                 }
             };
             let state = if enabled { "ON ✅" } else { "OFF ❌" };
-            msg.reply(&format!("Welcome messages turned {}", state)).await?;
+            super::reply(ctx, msg, &format!("Welcome messages turned {}", state)).await?;
         }
 
         // =====================================================================
@@ -604,13 +604,13 @@ async fn dispatch_v2_community(
 
 async fn auth_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let Some(ref auth) = ctx.auth else {
-        msg.reply("Auth system is not configured. All commands are public.").await?;
+        super::reply(ctx, msg, "Auth system is not configured. All commands are public.").await?;
         return Ok(());
     };
 
     let npub = sender_npub(msg);
     if npub.is_empty() {
-        msg.reply("⚠️ Could not determine your npub from this message.").await?;
+        super::reply(ctx, msg, "⚠️ Could not determine your npub from this message.").await?;
         return Ok(());
     }
 
@@ -626,20 +626,20 @@ async fn auth_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         ),
     };
 
-    msg.reply(&status_text).await?;
+    super::reply(ctx, msg, &status_text).await?;
     Ok(())
 }
 
 async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let Some(ref auth) = ctx.auth else {
-        msg.reply("Auth system is not configured.").await?;
+        super::reply(ctx, msg, "Auth system is not configured.").await?;
         return Ok(());
     };
 
     // Parse: !add <npub> [global]
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
-        msg.reply("Usage: !add <npub> [global]\n\nAdds user to this community. Use 'global' to authorize in all communities.").await?;
+        super::reply(ctx, msg, "Usage: !add <npub> [global]\n\nAdds user to this community. Use 'global' to authorize in all communities.").await?;
         return Ok(());
     }
 
@@ -647,12 +647,12 @@ async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Res
     let as_global = parts.get(1).map(|s| *s == "global").unwrap_or(false);
 
     if npub.is_empty() || !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...").await?;
         return Ok(());
     }
 
     if auth.is_owner(&npub) {
-        msg.reply("ℹ️ That npub is already the owner — no need to add.").await?;
+        super::reply(ctx, msg, "ℹ️ That npub is already the owner — no need to add.").await?;
         return Ok(());
     }
 
@@ -660,25 +660,25 @@ async fn add_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Res
     let scope_label = if as_global { "globally" } else { "in this community" };
 
     if auth.is_authorized(&npub, cid.as_deref()) {
-        msg.reply(&format!("ℹ️ {} is already authorized {}.", npub, scope_label)).await?;
+        super::reply(ctx, msg, &format!("ℹ️ {} is already authorized {}.", npub, scope_label)).await?;
         return Ok(());
     }
 
     auth.add(&npub, cid.as_deref());
-    msg.reply(&format!("✅ Added {} to authorized users {}.", npub, scope_label)).await?;
+    super::reply(ctx, msg, &format!("✅ Added {} to authorized users {}.", npub, scope_label)).await?;
     tracing::info!("Authorized user added: {} scope={:?}", npub, cid);
     Ok(())
 }
 
 async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let Some(ref auth) = ctx.auth else {
-        msg.reply("Auth system is not configured.").await?;
+        super::reply(ctx, msg, "Auth system is not configured.").await?;
         return Ok(());
     };
 
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
-        msg.reply("Usage: !remove <npub> [global]").await?;
+        super::reply(ctx, msg, "Usage: !remove <npub> [global]").await?;
         return Ok(());
     }
 
@@ -686,12 +686,12 @@ async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> 
     let from_global = parts.get(1).map(|s| *s == "global").unwrap_or(false);
 
     if npub.is_empty() {
-        msg.reply("Usage: !remove <npub>").await?;
+        super::reply(ctx, msg, "Usage: !remove <npub>").await?;
         return Ok(());
     }
 
     if auth.is_owner(&npub) {
-        msg.reply("⚠️ Cannot remove the owner.").await?;
+        super::reply(ctx, msg, "⚠️ Cannot remove the owner.").await?;
         return Ok(());
     }
 
@@ -699,19 +699,19 @@ async fn remove_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> 
     let scope_label = if from_global { "global" } else { "this community" };
 
     if !auth.is_authorized(&npub, cid.as_deref()) {
-        msg.reply(&format!("ℹ️ {} is not authorized in {}.", npub, scope_label)).await?;
+        super::reply(ctx, msg, &format!("ℹ️ {} is not authorized in {}.", npub, scope_label)).await?;
         return Ok(());
     }
 
     auth.remove(&npub, cid.as_deref());
-    msg.reply(&format!("✅ Removed {} from {} authorized users.", npub, scope_label)).await?;
+    super::reply(ctx, msg, &format!("✅ Removed {} from {} authorized users.", npub, scope_label)).await?;
     tracing::info!("Authorized user removed: {} scope={:?}", npub, cid);
     Ok(())
 }
 
 async fn list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
     let Some(ref auth) = ctx.auth else {
-        msg.reply("Auth system is not configured.").await?;
+        super::reply(ctx, msg, "Auth system is not configured.").await?;
         return Ok(());
     };
 
@@ -739,7 +739,7 @@ async fn list_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         lines.push("Authorized users: (none)".to_string());
     }
 
-    msg.reply(&lines.join("\n")).await?;
+    super::reply(ctx, msg, &lines.join("\n")).await?;
     Ok(())
 }
 
@@ -753,20 +753,20 @@ async fn enable_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
 
     match ctx.community_db.is_channel_enabled(channel_id) {
         Ok(true) => {
-            msg.reply("✅ This channel is already enabled.").await?;
+            super::reply(ctx, msg, "✅ This channel is already enabled.").await?;
         }
         Ok(false) => {
             if let Err(e) = ctx.community_db.set_channel_enabled(channel_id, true, &npub) {
                 tracing::error!("Failed to enable channel: {}", e);
-                msg.reply("⚠️ Failed to enable channel.").await?;
+                super::reply(ctx, msg, "⚠️ Failed to enable channel.").await?;
                 return Ok(());
             }
-            msg.reply("✅ Bot enabled for this channel. I'm listening!").await?;
+            super::reply(ctx, msg, "✅ Bot enabled for this channel. I'm listening!").await?;
             tracing::info!("Channel {} enabled by {}", channel_id, npub);
         }
         Err(e) => {
             tracing::error!("Channel state check failed: {}", e);
-            msg.reply("⚠️ Could not check channel state.").await?;
+            super::reply(ctx, msg, "⚠️ Could not check channel state.").await?;
         }
     }
     Ok(())
@@ -780,18 +780,18 @@ async fn disable_command(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> 
         Ok(true) => {
             if let Err(e) = ctx.community_db.set_channel_enabled(channel_id, false, &npub) {
                 tracing::error!("Failed to disable channel: {}", e);
-                msg.reply("⚠️ Failed to disable channel.").await?;
+                super::reply(ctx, msg, "⚠️ Failed to disable channel.").await?;
                 return Ok(());
             }
-            msg.reply("🔇 Bot disabled for this channel. I'll stop responding here. Use !enable to turn me back on.").await?;
+            super::reply(ctx, msg, "🔇 Bot disabled for this channel. I'll stop responding here. Use !enable to turn me back on.").await?;
             tracing::info!("Channel {} disabled by {}", channel_id, npub);
         }
         Ok(false) => {
-            msg.reply("🔇 This channel is already disabled.").await?;
+            super::reply(ctx, msg, "🔇 This channel is already disabled.").await?;
         }
         Err(e) => {
             tracing::error!("Channel state check failed: {}", e);
-            msg.reply("⚠️ Could not check channel state.").await?;
+            super::reply(ctx, msg, "⚠️ Could not check channel state.").await?;
         }
     }
     Ok(())

@@ -41,11 +41,11 @@ const NAK_TIMEOUT_SECS: u64 = 15;
 // !nostr <npub> — Profile lookup
 // -----------------------------------------------------------------------------
 
-pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn nostr_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let input = normalize_npub(args);
 
     if input.is_empty() {
-        msg.reply("Usage: !nostr <npub>\nExample: !nostr npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
+        super::reply(ctx, msg, "Usage: !nostr <npub>\nExample: !nostr npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
         return Ok(());
     }
 
@@ -54,7 +54,7 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve pubkey {}: {}", input, e);
-            msg.reply(&format!("⚠️ Could not resolve \"{}\". Make sure it's a valid npub or hex pubkey.", input)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Could not resolve \"{}\". Make sure it's a valid npub or hex pubkey.", input)).await?;
             return Ok(());
         }
     };
@@ -76,12 +76,12 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             tracing::warn!("nak req failed: {}", e);
-            msg.reply("⚠️ Could not reach Nostr relays. Try again later.").await?;
+            super::reply(ctx, msg, "⚠️ Could not reach Nostr relays. Try again later.").await?;
             return Ok(());
         }
         Err(_) => {
             tracing::warn!("nak req timed out");
-            msg.reply("⚠️ Relay lookup timed out. Try again later.").await?;
+            super::reply(ctx, msg, "⚠️ Relay lookup timed out. Try again later.").await?;
             return Ok(());
         }
     };
@@ -97,7 +97,7 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let event = match profile_data {
         Some(e) => e,
         None => {
-            msg.reply(&format!("🔍 No profile found for {}", input)).await?;
+            super::reply(ctx, msg, &format!("🔍 No profile found for {}", input)).await?;
             return Ok(());
         }
     };
@@ -148,7 +148,7 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         response.push_str(&format!("🖼️ {}", pic));
     }
 
-    msg.reply(response.trim()).await?;
+    super::reply(ctx, msg, response.trim()).await?;
     Ok(())
 }
 
@@ -156,11 +156,11 @@ pub async fn nostr_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
 // !nip05 <user@domain> — NIP-05 verification
 // -----------------------------------------------------------------------------
 
-pub async fn nip05_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn nip05_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let input = args.trim();
 
     if input.is_empty() {
-        msg.reply("Usage: !nip05 <user@domain>\nExample: !nip05 derekross@nostrplebs.com").await?;
+        super::reply(ctx, msg, "Usage: !nip05 <user@domain>\nExample: !nip05 derekross@nostrplebs.com").await?;
         return Ok(());
     }
 
@@ -168,7 +168,7 @@ pub async fn nip05_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let (user, domain) = match input.split_once('@') {
         Some((u, d)) if !u.is_empty() && !d.is_empty() => (u, d),
         _ => {
-            msg.reply("⚠️ Invalid format. Use: user@domain\nExample: !nip05 derekross@nostrplebs.com").await?;
+            super::reply(ctx, msg, "⚠️ Invalid format. Use: user@domain\nExample: !nip05 derekross@nostrplebs.com").await?;
             return Ok(());
         }
     };
@@ -183,7 +183,7 @@ pub async fn nip05_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(d) => d,
         Err(e) => {
             tracing::warn!("NIP-05 fetch failed for {}: {}", input, e);
-            msg.reply(&format!("❌ Not verified: {} not found", input)).await?;
+            super::reply(ctx, msg, &format!("❌ Not verified: {} not found", input)).await?;
             return Ok(());
         }
     };
@@ -195,10 +195,10 @@ pub async fn nip05_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Some(pubkey) => {
             // Convert hex to npub for display
             let npub = hex_to_npub(pubkey).await.unwrap_or_else(|_| pubkey.to_string());
-            msg.reply(&format!("✅ Verified: {} → {}", input, npub)).await?;
+            super::reply(ctx, msg, &format!("✅ Verified: {} → {}", input, npub)).await?;
         }
         None => {
-            msg.reply(&format!("❌ Not verified: {} not found", input)).await?;
+            super::reply(ctx, msg, &format!("❌ Not verified: {} not found", input)).await?;
         }
     }
 
@@ -213,7 +213,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let input = normalize_npub(args);
 
     if input.is_empty() {
-        msg.reply("Usage: !follow <npub>\nExample: !follow npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
+        super::reply(ctx, msg, "Usage: !follow <npub>\nExample: !follow npub1jrvdfzf9aglmkt3nzpm4y6x3tq056qwh5v6ge2x2g9wkx27j58gsj7nev5").await?;
         return Ok(());
     }
 
@@ -221,7 +221,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let nsec = match ctx.config.bot_nsec() {
         Some(k) => k,
         None => {
-            msg.reply("⚠️ Bot does not have an nsec configured. Cannot publish follow lists.").await?;
+            super::reply(ctx, msg, "⚠️ Bot does not have an nsec configured. Cannot publish follow lists.").await?;
             return Ok(());
         }
     };
@@ -231,7 +231,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve pubkey {}: {}", input, e);
-            msg.reply(&format!("⚠️ Could not resolve \"{}\". Make sure it's a valid npub or hex pubkey.", input)).await?;
+            super::reply(ctx, msg, &format!("⚠️ Could not resolve \"{}\". Make sure it's a valid npub or hex pubkey.", input)).await?;
             return Ok(());
         }
     };
@@ -242,7 +242,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(h) => h,
         Err(e) => {
             tracing::warn!("Failed to resolve bot's own npub {}: {}", bot_npub, e);
-            msg.reply("⚠️ Could not resolve bot's own identity. This is a configuration issue.").await?;
+            super::reply(ctx, msg, "⚠️ Could not resolve bot's own identity. This is a configuration issue.").await?;
             return Ok(());
         }
     };
@@ -263,12 +263,12 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             tracing::warn!("nak req kind 3 failed: {}", e);
-            msg.reply("⚠️ Could not fetch current follow list from relays.").await?;
+            super::reply(ctx, msg, "⚠️ Could not fetch current follow list from relays.").await?;
             return Ok(());
         }
         Err(_) => {
             tracing::warn!("nak req kind 3 timed out");
-            msg.reply("⚠️ Relay lookup timed out. Try again later.").await?;
+            super::reply(ctx, msg, "⚠️ Relay lookup timed out. Try again later.").await?;
             return Ok(());
         }
     };
@@ -304,7 +304,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
     // Check if already following
     let already_following = p_tags.iter().any(|t| t.len() >= 2 && t[1] == target_hex);
     if already_following {
-        msg.reply(&format!("ℹ️ Already following {}.", input)).await?;
+        super::reply(ctx, msg, &format!("ℹ️ Already following {}.", input)).await?;
         return Ok(());
     }
 
@@ -346,7 +346,7 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("Failed to spawn nak event: {}", e);
-            msg.reply("⚠️ Could not publish follow list. Is `nak` installed?").await?;
+            super::reply(ctx, msg, "⚠️ Could not publish follow list. Is `nak` installed?").await?;
             return Ok(());
         }
     };
@@ -367,12 +367,12 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             tracing::warn!("nak event failed: {}", e);
-            msg.reply("⚠️ Failed to publish follow list to relays.").await?;
+            super::reply(ctx, msg, "⚠️ Failed to publish follow list to relays.").await?;
             return Ok(());
         }
         Err(_) => {
             tracing::warn!("nak event timed out");
-            msg.reply("⚠️ Publishing follow list timed out. Try again later.").await?;
+            super::reply(ctx, msg, "⚠️ Publishing follow list timed out. Try again later.").await?;
             return Ok(());
         }
     };
@@ -385,9 +385,9 @@ pub async fn follow_command(ctx: &BotContext, msg: &IncomingMessage, args: &str)
     tracing::debug!("nak event stderr: {}", publish_stderr);
 
     if publish_stdout.contains("\"id\"") || publish_stdout.contains("published") || !publish_stdout.trim().is_empty() {
-        msg.reply(&format!("✅ Now following {} (total: {} follows)", input, total_follows)).await?;
+        super::reply(ctx, msg, &format!("✅ Now following {} (total: {} follows)", input, total_follows)).await?;
     } else {
-        msg.reply(&format!("✅ Follow list published (total: {} follows)", total_follows)).await?;
+        super::reply(ctx, msg, &format!("✅ Follow list published (total: {} follows)", total_follows)).await?;
     }
 
     Ok(())

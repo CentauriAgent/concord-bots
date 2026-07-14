@@ -89,11 +89,11 @@ fn is_permission_error<E: std::fmt::Debug>(e: &E) -> bool {
 // !leave — Leave the current community (owner only)
 // -----------------------------------------------------------------------------
 
-pub async fn leave_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
+pub async fn leave_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
@@ -101,19 +101,19 @@ pub async fn leave_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str
 
     let community_id = community.id().to_string();
 
-    msg.reply(&format!("👋 Leaving community... ({})", community_id))
+    super::reply(ctx, msg, &format!("👋 Leaving community... ({})", community_id))
         .await?;
 
     match community.leave().await {
         Ok(()) => {
-            msg.reply("✅ Successfully left the community. Goodbye! 👋")
+            super::reply(ctx, msg, "✅ Successfully left the community. Goodbye! 👋")
                 .await?;
             tracing::info!("Bot left community {} (requested by owner)", community_id);
         }
         Err(e) => {
             let err_text = format!("{:?}", e);
             tracing::error!("Failed to leave community {}: {}", community_id, err_text);
-            msg.reply(&format!("⚠️ Could not leave the community: {}", err_text))
+            super::reply(ctx, msg, &format!("⚠️ Could not leave the community: {}", err_text))
                 .await?;
         }
     }
@@ -125,17 +125,17 @@ pub async fn leave_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str
 // !kick <npub> — Kick a member (cooperative)
 // -----------------------------------------------------------------------------
 
-pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn kick_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !kick <npub>\nExample: !kick nostr:npub1abc...  OR  !kick npub1abc...")
+        super::reply(ctx, msg, "Usage: !kick <npub>\nExample: !kick nostr:npub1abc...  OR  !kick npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -143,28 +143,28 @@ pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
     };
 
     // Don't kick yourself or the owner.
-    if npub == _ctx.bot.npub() {
-        msg.reply("⚠️ I can't kick myself!").await?;
+    if npub == ctx.bot.npub() {
+        super::reply(ctx, msg, "⚠️ I can't kick myself!").await?;
         return Ok(());
     }
 
     // Check if target is the owner.
     let target_member = community.member(&npub);
     if target_member.is_owner() {
-        msg.reply("⚠️ I can't kick the community owner.").await?;
+        super::reply(ctx, msg, "⚠️ I can't kick the community owner.").await?;
         return Ok(());
     }
 
     match target_member.kick().await {
         Ok(()) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "👢 Kicked {} from the community. (They can rejoin.)",
                 npub
             ))
@@ -173,13 +173,13 @@ pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
         }
         Err(e) => {
             if is_permission_error(&e) {
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ I don't have permission to kick that member. Need KICK capability + higher rank.",
                 )
                 .await?;
             } else {
                 tracing::warn!("Kick failed: {:?}", e);
-                msg.reply(&format!("⚠️ Kick failed: {}", e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Kick failed: {}", e)).await?;
             }
         }
     }
@@ -191,17 +191,17 @@ pub async fn kick_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) 
 // !ban <npub> — Ban a member (terminal; rekeys private communities)
 // -----------------------------------------------------------------------------
 
-pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn ban_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !ban <npub>\nExample: !ban nostr:npub1abc...  OR  !ban npub1abc...")
+        super::reply(ctx, msg, "Usage: !ban <npub>\nExample: !ban nostr:npub1abc...  OR  !ban npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -209,26 +209,26 @@ pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
     };
 
-    if npub == _ctx.bot.npub() {
-        msg.reply("⚠️ I can't ban myself!").await?;
+    if npub == ctx.bot.npub() {
+        super::reply(ctx, msg, "⚠️ I can't ban myself!").await?;
         return Ok(());
     }
 
     let target_member = community.member(&npub);
     if target_member.is_owner() {
-        msg.reply("⚠️ I can't ban the community owner.").await?;
+        super::reply(ctx, msg, "⚠️ I can't ban the community owner.").await?;
         return Ok(());
     }
 
     match target_member.ban().await {
         Ok(()) => {
-            msg.reply(&format!(
+            super::reply(ctx, msg, &format!(
                 "🔨 Banned {} from the community. (Community keys rotated for security)",
                 npub
             ))
@@ -237,13 +237,13 @@ pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -
         }
         Err(e) => {
             if is_permission_error(&e) {
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ I don't have permission to ban that member. Need BAN capability + higher rank.",
                 )
                 .await?;
             } else {
                 tracing::warn!("Ban failed: {:?}", e);
-                msg.reply(&format!("⚠️ Ban failed: {}", e)).await?;
+                super::reply(ctx, msg, &format!("⚠️ Ban failed: {}", e)).await?;
             }
         }
     }
@@ -255,17 +255,17 @@ pub async fn ban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -
 // !unban <npub> — Lift a ban
 // -----------------------------------------------------------------------------
 
-pub async fn unban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn unban_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !unban <npub>\nExample: !unban nostr:npub1abc...  OR  !unban npub1abc...")
+        super::reply(ctx, msg, "Usage: !unban <npub>\nExample: !unban nostr:npub1abc...  OR  !unban npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -273,7 +273,7 @@ pub async fn unban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
@@ -283,19 +283,19 @@ pub async fn unban_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str)
 
     match target_member.unban().await {
         Ok(()) => {
-            msg.reply(&format!("✅ Unbanned {} from the community.", npub))
+            super::reply(ctx, msg, &format!("✅ Unbanned {} from the community.", npub))
                 .await?;
             tracing::info!("Unbanned {} from community {}", npub, community.id());
         }
         Err(e) => {
             if is_permission_error(&e) {
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ I don't have permission to unban that member. Need BAN capability.",
                 )
                 .await?;
             } else {
                 tracing::warn!("Unban failed: {:?}", e);
-                msg.reply(&format!("⚠️ Could not unban {}. They may not be banned or I lack permission.", npub))
+                super::reply(ctx, msg, &format!("⚠️ Could not unban {}. They may not be banned or I lack permission.", npub))
                     .await?;
             }
         }
@@ -312,7 +312,7 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
     let args = args.trim();
 
     if args.is_empty() {
-        msg.reply("Usage: !warn <npub> <reason>\nExample: !warn npub1abc... Please be respectful")
+        super::reply(ctx, msg, "Usage: !warn <npub> <reason>\nExample: !warn npub1abc... Please be respectful")
             .await?;
         return Ok(());
     }
@@ -323,13 +323,13 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
     let reason = parts.get(1).copied().unwrap_or("").trim();
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
 
     if reason.is_empty() {
-        msg.reply("⚠️ Please provide a reason.\nExample: !warn nostr:npub1abc... Spamming links  OR  !warn npub1abc... Spamming links")
+        super::reply(ctx, msg, "⚠️ Please provide a reason.\nExample: !warn nostr:npub1abc... Spamming links  OR  !warn npub1abc... Spamming links")
             .await?;
         return Ok(());
     }
@@ -351,7 +351,7 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
     warnings.push(warning);
     save_warnings(&warnings);
 
-    msg.reply(&format!(
+    super::reply(ctx, msg, &format!(
         "⚠️ Warning issued to {} (warning #{}): {}",
         npub, warning_number, reason
     ))
@@ -365,17 +365,17 @@ pub async fn warn_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -
 // !warnings <npub> — Show warning history
 // -----------------------------------------------------------------------------
 
-pub async fn warnings_command(_ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
+pub async fn warnings_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !warnings <npub>\nExample: !warnings nostr:npub1abc...  OR  !warnings npub1abc...")
+        super::reply(ctx, msg, "Usage: !warnings <npub>\nExample: !warnings nostr:npub1abc...  OR  !warnings npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -384,7 +384,7 @@ pub async fn warnings_command(_ctx: &BotContext, msg: &IncomingMessage, args: &s
     let user_warnings: Vec<&Warning> = all_warnings.iter().filter(|w| w.npub == npub).collect();
 
     if user_warnings.is_empty() {
-        msg.reply(&format!("📋 No warnings on record for {}.", npub))
+        super::reply(ctx, msg, &format!("📋 No warnings on record for {}.", npub))
             .await?;
         return Ok(());
     }
@@ -399,7 +399,7 @@ pub async fn warnings_command(_ctx: &BotContext, msg: &IncomingMessage, args: &s
         ));
     }
 
-    msg.reply(response.trim()).await?;
+    super::reply(ctx, msg, response.trim()).await?;
     Ok(())
 }
 
@@ -407,11 +407,11 @@ pub async fn warnings_command(_ctx: &BotContext, msg: &IncomingMessage, args: &s
 // !mods — List community roles (v2: uses community.roles())
 // -----------------------------------------------------------------------------
 
-pub async fn mods_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
+pub async fn mods_command(ctx: &BotContext, msg: &IncomingMessage, _args: &str) -> Result<()> {
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
@@ -419,12 +419,12 @@ pub async fn mods_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str)
 
     match community.roles() {
         Ok(roles) => {
-            msg.reply(&format!("📋 Community roles:\n```{}```", roles))
+            super::reply(ctx, msg, &format!("📋 Community roles:\n```{}```", roles))
                 .await?;
         }
         Err(e) => {
             tracing::warn!("Failed to fetch roles: {:?}", e);
-            msg.reply(&format!("⚠️ Could not fetch roles: {}", e))
+            super::reply(ctx, msg, &format!("⚠️ Could not fetch roles: {}", e))
                 .await?;
         }
     }
@@ -437,20 +437,20 @@ pub async fn mods_command(_ctx: &BotContext, msg: &IncomingMessage, _args: &str)
 // -----------------------------------------------------------------------------
 
 pub async fn grantmod_command(
-    _ctx: &BotContext,
+    ctx: &BotContext,
     msg: &IncomingMessage,
     args: &str,
 ) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !grantmod <npub>\nExample: !grantmod nostr:npub1abc...  OR  !grantmod npub1abc...")
+        super::reply(ctx, msg, "Usage: !grantmod <npub>\nExample: !grantmod nostr:npub1abc...  OR  !grantmod npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -458,7 +458,7 @@ pub async fn grantmod_command(
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
@@ -468,26 +468,26 @@ pub async fn grantmod_command(
 
     // Check if already admin
     if target_member.is_admin() {
-        msg.reply(&format!("ℹ️ {} is already an admin.", npub))
+        super::reply(ctx, msg, &format!("ℹ️ {} is already an admin.", npub))
             .await?;
         return Ok(());
     }
 
     match target_member.grant_admin().await {
         Ok(()) => {
-            msg.reply(&format!("✅ Granted admin role to {}.", npub))
+            super::reply(ctx, msg, &format!("✅ Granted admin role to {}.", npub))
                 .await?;
             tracing::info!("Granted admin to {} in community {}", npub, community.id());
         }
         Err(e) => {
             if is_permission_error(&e) {
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ I don't have permission to manage roles. Need MANAGE_ROLES capability.",
                 )
                 .await?;
             } else {
                 tracing::warn!("Grant admin failed: {:?}", e);
-                msg.reply(&format!("⚠️ Could not grant admin to {}: {}", npub, e))
+                super::reply(ctx, msg, &format!("⚠️ Could not grant admin to {}: {}", npub, e))
                     .await?;
             }
         }
@@ -501,20 +501,20 @@ pub async fn grantmod_command(
 // -----------------------------------------------------------------------------
 
 pub async fn revokemod_command(
-    _ctx: &BotContext,
+    ctx: &BotContext,
     msg: &IncomingMessage,
     args: &str,
 ) -> Result<()> {
     let npub = normalize_npub(args);
 
     if npub.is_empty() {
-        msg.reply("Usage: !revokemod <npub>\nExample: !revokemod nostr:npub1abc...  OR  !revokemod npub1abc...")
+        super::reply(ctx, msg, "Usage: !revokemod <npub>\nExample: !revokemod nostr:npub1abc...  OR  !revokemod npub1abc...")
             .await?;
         return Ok(());
     }
 
     if !npub.starts_with("npub1") {
-        msg.reply("⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
+        super::reply(ctx, msg, "⚠️ That doesn't look like a valid npub. Use npub1... or nostr:npub1...")
             .await?;
         return Ok(());
     }
@@ -522,7 +522,7 @@ pub async fn revokemod_command(
     let community = match msg.community() {
         Some(c) => c,
         None => {
-            msg.reply("⚠️ This command can only be used in a community channel.")
+            super::reply(ctx, msg, "⚠️ This command can only be used in a community channel.")
                 .await?;
             return Ok(());
         }
@@ -531,33 +531,33 @@ pub async fn revokemod_command(
     // Don't revoke from owner.
     let target_member = community.member(&npub);
     if target_member.is_owner() {
-        msg.reply("⚠️ Cannot revoke admin from the community owner.")
+        super::reply(ctx, msg, "⚠️ Cannot revoke admin from the community owner.")
             .await?;
         return Ok(());
     }
 
     // Check if they're actually an admin.
     if !target_member.is_admin() {
-        msg.reply(&format!("ℹ️ {} is not an admin.", npub))
+        super::reply(ctx, msg, &format!("ℹ️ {} is not an admin.", npub))
             .await?;
         return Ok(());
     }
 
     match target_member.revoke_admin().await {
         Ok(()) => {
-            msg.reply(&format!("✅ Revoked admin role from {}.", npub))
+            super::reply(ctx, msg, &format!("✅ Revoked admin role from {}.", npub))
                 .await?;
             tracing::info!("Revoked admin from {} in community {}", npub, community.id());
         }
         Err(e) => {
             if is_permission_error(&e) {
-                msg.reply(
+                super::reply(ctx, msg, 
                     "⚠️ I don't have permission to manage roles. Need MANAGE_ROLES capability.",
                 )
                 .await?;
             } else {
                 tracing::warn!("Revoke admin failed: {:?}", e);
-                msg.reply(&format!("⚠️ Could not revoke admin from {}: {}", npub, e))
+                super::reply(ctx, msg, &format!("⚠️ Could not revoke admin from {}: {}", npub, e))
                     .await?;
             }
         }
