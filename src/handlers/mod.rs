@@ -150,7 +150,8 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
             if !npub.is_empty() && npub != &ctx.bot.npub() {
                 // Only award XP if community features are enabled
                 if ctx.config.features.is_enabled(crate::config::Feature::Community) {
-                    award_message_xp(ctx, npub, &msg.chat_id).await;
+                    let community_id = msg.community().map(|c| c.id().to_string());
+                    award_message_xp(ctx, npub, &msg.chat_id, community_id.as_deref()).await;
                 }
             }
         }
@@ -206,7 +207,7 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
 
 /// Award XP for a non-command message. Enforces 60-second cooldown and
 /// announces level-ups. 15-25 random XP per message.
-async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str) {
+async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str, community_id: Option<&str>) {
     // Check 60-second cooldown
     match ctx.community_db.is_on_xp_cooldown(npub, 60) {
         Ok(true) => return, // still on cooldown
@@ -225,9 +226,8 @@ async fn award_message_xp(ctx: &BotContext, npub: &str, channel_id: &str) {
     // Award 15-25 random XP (compute before any .await)
     // Skip entirely if leaderboard is disabled globally or in this community
     let leaderboard_globally_on = ctx.config.features.is_enabled(crate::config::Feature::Leaderboard);
-    let leaderboard_community_on = ctx
-        .community_db
-        .is_leaderboard_enabled(channel_id)
+    let leaderboard_community_on = community_id
+        .and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok())
         .unwrap_or(true);
 
     if leaderboard_globally_on && leaderboard_community_on {
@@ -308,9 +308,18 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MessageUpdate { chat_id, message } => {
             tracing::debug!("Message update in chat {}: {} reactions", chat_id, message.reactions.len());
             // Award XP for reactions on the author's message (community engagement)
+            // Resolve community ID from channel ID for per-community leaderboard check
+            let reaction_community_id =
+                vector_sdk::vector_core::db::community::community_id_for_channel(chat_id)
+                    .ok()
+                    .flatten();
+            let leaderboard_on = reaction_community_id
+                .as_deref()
+                .and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok())
+                .unwrap_or(true);
             if ctx.config.features.is_enabled(Feature::Community)
                 && ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
-                && ctx.community_db.is_leaderboard_enabled(chat_id).unwrap_or(true)
+                && leaderboard_on
                 && !message.reactions.is_empty()
             {
                 if let Some(ref npub) = message.npub {

@@ -118,8 +118,9 @@ pub async fn tip_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
 
             // Community XP: sender gets +5 XP for tipping
             if let Some(ref sender_npub) = msg.message.npub {
+                let community_id = msg.community().map(|c| c.id().to_string());
                 if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
-                    && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+                    && community_id.as_deref().and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok()).unwrap_or(true)
                 {
                     if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
                         tracing::warn!("Failed to award tip XP to sender: {}", e);
@@ -420,9 +421,10 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             )).await?;
 
             // Community XP: sender gets +5, recipient gets +10
+            let community_id = msg.community().map(|c| c.id().to_string());
             if let Some(ref sender_npub) = msg.message.npub {
                 if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
-                    && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+                    && community_id.as_deref().and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok()).unwrap_or(true)
                 {
                     if let Err(e) = ctx.community_db.award_xp(sender_npub, 5, &msg.chat_id) {
                         tracing::warn!("Failed to award zap XP to sender: {}", e);
@@ -434,7 +436,7 @@ pub async fn zap_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) ->
             }
             // Award recipient XP (using npub_input as the recipient identifier)
             if ctx.config.features.is_enabled(crate::config::Feature::Leaderboard)
-                && ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true)
+                && community_id.as_deref().and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok()).unwrap_or(true)
             {
                 if let Err(e) = ctx.community_db.award_xp(&npub_input, 10, &msg.chat_id) {
                     tracing::warn!("Failed to award zap XP to recipient: {}", e);

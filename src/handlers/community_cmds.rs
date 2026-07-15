@@ -97,7 +97,14 @@ fn parse_duration(s: &str) -> Option<u64> {
 
 pub async fn level_command(ctx: &BotContext, msg: &IncomingMessage, args: &str) -> Result<()> {
     // Check per-community leaderboard toggle
-    if !ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true) {
+    let community_id = match msg.community() {
+        Some(c) => c.id().to_string(),
+        None => {
+            super::reply(ctx, msg, "⚠️ Level commands can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+    if !ctx.community_db.is_leaderboard_enabled(&community_id).unwrap_or(true) {
         super::reply(ctx, msg, "📊 Leaderboard is disabled in this community.").await?;
         return Ok(());
     }
@@ -162,8 +169,16 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage, args: 
                 super::reply(ctx, msg, "⛔ Not authorized. Ask the owner to add your npub.").await?;
                 return Ok(());
             }
+            // Use community ID, not channel ID, so the setting applies community-wide
+            let community_id = match msg.community() {
+                Some(c) => c.id().to_string(),
+                None => {
+                    super::reply(ctx, msg, "⚠️ Leaderboard can only be toggled in a community channel.").await?;
+                    return Ok(());
+                }
+            };
             let enabled = args == "on";
-            if let Err(e) = ctx.community_db.set_leaderboard_enabled(&msg.chat_id, enabled) {
+            if let Err(e) = ctx.community_db.set_leaderboard_enabled(&community_id, enabled) {
                 tracing::warn!("Failed to set leaderboard toggle: {}", e);
                 super::reply(ctx, msg, "⚠️ Could not update leaderboard setting.").await?;
                 return Ok(());
@@ -173,7 +188,14 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage, args: 
             return Ok(());
         }
         "status" => {
-            let enabled = ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true);
+            let community_id = match msg.community() {
+                Some(c) => c.id().to_string(),
+                None => {
+                    super::reply(ctx, msg, "⚠️ Leaderboard can only be checked in a community channel.").await?;
+                    return Ok(());
+                }
+            };
+            let enabled = ctx.community_db.is_leaderboard_enabled(&community_id).unwrap_or(true);
             let status = if enabled { "enabled ✅" } else { "disabled ⛔" };
             super::reply(ctx, msg, &format!("📊 Leaderboard is {} for this community.", status)).await?;
             return Ok(());
@@ -182,7 +204,14 @@ pub async fn leaderboard_command(ctx: &BotContext, msg: &IncomingMessage, args: 
     }
 
     // Check if leaderboard is enabled before showing it
-    if !ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true) {
+    let community_id = match msg.community() {
+        Some(c) => c.id().to_string(),
+        None => {
+            super::reply(ctx, msg, "⚠️ Leaderboard can only be used in a community channel.").await?;
+            return Ok(());
+        }
+    };
+    if !ctx.community_db.is_leaderboard_enabled(&community_id).unwrap_or(true) {
         super::reply(ctx, msg, "📊 Leaderboard is disabled in this community. Use `!leaderboard on` to enable (requires authorization).").await?;
         return Ok(());
     }
@@ -251,7 +280,11 @@ pub async fn profile_command(ctx: &BotContext, msg: &IncomingMessage, args: &str
     let member_since = format_member_since(stats.first_seen);
 
     // Hide level/XP/rank lines when leaderboard is disabled in this community
-    let leaderboard_on = ctx.community_db.is_leaderboard_enabled(&msg.chat_id).unwrap_or(true);
+    let community_id = msg.community().map(|c| c.id().to_string());
+    let leaderboard_on = community_id
+        .as_deref()
+        .and_then(|cid| ctx.community_db.is_leaderboard_enabled(cid).ok())
+        .unwrap_or(true);
 
     let rank = if leaderboard_on {
         ctx.community_db
