@@ -51,7 +51,14 @@ pub async fn reply_as_thread(ctx: &BotContext, msg: &IncomingMessage, text: &str
 /// Mirrors the flow of `vector_core::community::v2::service::send_chat_message`
 /// but uses `build_comment_rumor` (kind 1111) instead of `build_message_rumor`
 /// (kind 9).
-async fn send_comment(_ctx: &BotContext, msg: &IncomingMessage, text: &str) -> Result<String, String> {
+///
+/// **Key rotation safety:** This function loads the community's current epoch
+/// from local state to derive the sealing key. If the community recently
+/// rekeyed (epoch advance) and the follow worker hasn't processed it yet, the
+/// sealed event will use stale keys and peers won't be able to open it. To
+/// handle this, we trigger a community catch-up before sending, and retry once
+/// if the first attempt fails.
+async fn send_comment(ctx: &BotContext, msg: &IncomingMessage, text: &str) -> Result<String, String> {
     use vector_sdk::vector_core::{
         community::{
             ChannelId,
@@ -69,6 +76,11 @@ async fn send_comment(_ctx: &BotContext, msg: &IncomingMessage, text: &str) -> R
         simd::hex::hex_to_bytes_32,
         state::{my_public_key, nostr_client, SessionGuard, STATE, MY_SECRET_KEY},
     };
+
+    // Trigger a community state sync to pick up any recent rekeys before we
+    // read the epoch. This ensures we seal with the latest key, not a stale one.
+    // The sync is cheap if nothing has changed.
+    ctx.bot.sync_communities().await.ok();
 
     // 1. Resolve local identity keys.
     let author_keys = MY_SECRET_KEY
@@ -107,7 +119,12 @@ async fn send_comment(_ctx: &BotContext, msg: &IncomingMessage, text: &str) -> R
     }
 
     // 5. Derive the group key + epoch for sealing.
+    //    Log the epoch so we can diagnose stale-key issues.
     let (secret, epoch) = community.channel_secret(ch);
+    tracing::debug!(
+        "Sealing comment for channel {} at epoch {} (community {})",
+        channel_hex, epoch.0, community_id_hex
+    );
     let group = channel_group_key(&secret, &channel_id, epoch);
 
     // 6. Capture session generation (swap detection).

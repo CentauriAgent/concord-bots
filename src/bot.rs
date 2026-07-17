@@ -326,6 +326,25 @@ pub async fn run(config: BotConfig) -> Result<()> {
     }
 
     // -------------------------------------------------------------------------
+    // Step 4c: Sync community state (rekeys, epoch advances)
+    // -------------------------------------------------------------------------
+    // sync_communities() folds control events, rekeys, and banlist for every
+    // community the bot is in. For v2 communities this enqueues a follow worker
+    // that processes rekey rotations. We call it here AND give the worker a
+    // brief window to process pending rekeys before we start handling messages.
+    // Without this, a bot that was offline during an epoch advance would reply
+    // with stale keys until the follow worker catches up.
+    tracing::info!("Syncing community state (rekeys, epoch advances)...");
+    if let Err(e) = bot.sync_communities().await {
+        tracing::warn!("Community sync failed (non-fatal): {:?}", e);
+    }
+    // Brief pause to let the v2 follow worker process pending rekeys before
+    // we start handling messages. This is advisory — the worker continues
+    // in the background and the bot will pick up keys as they arrive.
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    tracing::info!("Community sync complete.");
+
+    // -------------------------------------------------------------------------
     // Step 5: Event loop (handles BOTH messages AND member joins)
     // -------------------------------------------------------------------------
     // Use on_event — it's a superset of on_message. Messages arrive as
