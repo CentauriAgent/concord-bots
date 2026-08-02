@@ -21,6 +21,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 once_cell = "1"
 
+# Auto-moderation: banned-pattern regex matching
+regex = "1"
+
 # Utility crates
 chrono = "0.4"
 chrono-tz = "0.10"

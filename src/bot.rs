@@ -16,6 +16,7 @@ use crate::community::Database;
 use crate::config::BotConfig;
 use crate::git_monitor::store::SubscriptionStore;
 use crate::handlers;
+use crate::handlers::automod::AutoModEngine;
 use crate::rate_limiter::RateLimiter;
 use crate::wallet::CashuWallet;
 
@@ -36,6 +37,8 @@ pub struct BotContext {
     pub community_db: Database,
     /// Git repo monitor subscription store.
     pub git_store: Option<SubscriptionStore>,
+    /// Auto-moderation engine (spam detection + auto-kick/ban).
+    pub automod: AutoModEngine,
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -255,6 +258,10 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // Step 3: Create shared context
     // -------------------------------------------------------------------------
 
+    // Initialize the auto-moderation engine (compiles regex patterns, loads
+    // persisted state). Off unless config.automod.enabled is true.
+    let automod = AutoModEngine::new(&config.automod);
+
     let ctx = BotContext {
         bot: bot.clone(),
         config: Arc::new(config),
@@ -263,6 +270,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         wallet,
         community_db,
         git_store,
+        automod,
     };
 
     // -------------------------------------------------------------------------

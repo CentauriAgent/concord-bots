@@ -37,6 +37,9 @@ pub struct BotConfig {
     /// Concord v2 community management settings.
     #[serde(default)]
     pub v2: V2Section,
+    /// Auto-moderation (spam detection + auto-kick/ban) settings.
+    #[serde(default)]
+    pub automod: AutoModSection,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -406,6 +409,24 @@ impl BotConfig {
                 if self.git_monitor.gitlab_token.is_empty() { "none" } else { "set" },
             );
         }
+        if self.automod.enabled {
+            tracing::info!(
+                "  automod: ENABLED (strict={}, burst={}/{}s, dupes={}/{}s, banned_words={}, patterns={}, thresholds warn/kick/ban={}/{}/{}, dry_run={}min)",
+                self.automod.strict_mode,
+                self.automod.max_messages,
+                self.automod.burst_window_secs,
+                self.automod.max_duplicates,
+                self.automod.dedupe_window_secs,
+                self.automod.banned_words.len(),
+                self.automod.banned_patterns.len(),
+                self.automod.warn_threshold,
+                self.automod.kick_threshold,
+                self.automod.ban_threshold,
+                self.automod.dry_run_minutes,
+            );
+        } else {
+            tracing::info!("  automod: disabled");
+        }
     }
 
     /// Access a custom config value by path (e.g., "api_keys.github_token").
@@ -603,6 +624,142 @@ pub struct V2Section {
     pub join_on_start: Vec<String>,
 }
 
+// -----------------------------------------------------------------------------
+// AutoMod section
+// -----------------------------------------------------------------------------
+
+/// Auto-moderation configuration (spam detection + auto-kick/ban).
+///
+/// Modeled on Discord's AutoMod: keyword filters, spam frequency, mention spam,
+/// link filtering, new-account flooding protection, and progressive escalation.
+///
+/// The struct is `#[serde(default)]` so existing configs without an `[automod]`
+/// section still parse fine, and every field also has a default so partial
+/// sections work too.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AutoModSection {
+    /// Master switch. Auto-mod does nothing unless this is true. Default: false.
+    pub enabled: bool,
+    /// If true, authorized users are also checked (owner is always immune).
+    pub strict_mode: bool,
+
+    // Rule 1: Rate burst
+    /// Max messages allowed in the burst window before flagging.
+    pub max_messages: u32,
+    /// Sliding burst window, in seconds.
+    pub burst_window_secs: u64,
+
+    // Rule 2: Duplicate content
+    /// Max identical messages allowed within the dedupe window.
+    pub max_duplicates: u32,
+    /// Dedupe comparison window, in seconds.
+    pub dedupe_window_secs: u64,
+
+    // Rule 3: Banned keywords/patterns
+    /// Exact-substring banned words (case-insensitive).
+    pub banned_words: Vec<String>,
+    /// Regex patterns; any match flags the message.
+    pub banned_patterns: Vec<String>,
+
+    // Rule 4: Link filtering
+    /// "off" | "flag" | "block".
+    pub link_action: String,
+    /// Domains that never count against link limits.
+    pub link_allowlist: Vec<String>,
+    /// Max links per message before scoring.
+    pub max_links: u32,
+
+    // Rule 5: Mention spam
+    /// Max npub mentions per message.
+    pub max_mentions: u32,
+
+    // Rule 6: New-account flooding
+    /// Grace window after a member joins, in seconds.
+    pub new_user_grace_secs: u64,
+    /// Max messages a new user may send during the grace window.
+    pub new_user_max_msgs: u32,
+
+    // Rule 7: Caps / wall of text
+    /// Percentage of caps letters that counts as shouting.
+    pub caps_threshold_pct: u32,
+    /// Minimum message length before caps checking applies.
+    pub caps_min_length: usize,
+    /// Maximum message length before it's flagged as a wall of text.
+    pub max_msg_length: usize,
+
+    // Scoring thresholds
+    /// Score at/above which a message is deleted + user warned.
+    pub warn_threshold: u32,
+    /// Score at/above which the user is kicked.
+    pub kick_threshold: u32,
+    /// Score at/above which the user is banned.
+    pub ban_threshold: u32,
+
+    // Escalation
+    /// Rolling escalation window, in seconds (default 24h).
+    pub escalation_window_secs: u64,
+    /// Nth violation within the window that forces a kick minimum.
+    pub escalation_kick_after: u32,
+    /// Nth violation within the window that forces a ban minimum.
+    pub escalation_ban_after: u32,
+
+    // Actions
+    /// Post "user X was kicked for spam" in the channel.
+    pub announce_actions: bool,
+    /// DM the owner on every ban.
+    pub announce_dm_owner: bool,
+    /// Delete the flagged message(s).
+    pub delete_spam_messages: bool,
+    /// Minutes to run in dry-run (log-only) mode after enabling. 0 disables.
+    pub dry_run_minutes: u64,
+}
+
+fn default_link_allowlist() -> Vec<String> {
+    vec![
+        "github.com".to_string(),
+        "gitlab.com".to_string(),
+        "nostr.org".to_string(),
+        "npmjs.com".to_string(),
+        "crates.io".to_string(),
+        "docs.rs".to_string(),
+    ]
+}
+
+impl Default for AutoModSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            strict_mode: false,
+            max_messages: 8,
+            burst_window_secs: 10,
+            max_duplicates: 3,
+            dedupe_window_secs: 60,
+            banned_words: Vec::new(),
+            banned_patterns: Vec::new(),
+            link_action: "flag".to_string(),
+            link_allowlist: default_link_allowlist(),
+            max_links: 3,
+            max_mentions: 5,
+            new_user_grace_secs: 120,
+            new_user_max_msgs: 3,
+            caps_threshold_pct: 70,
+            caps_min_length: 20,
+            max_msg_length: 1000,
+            warn_threshold: 3,
+            kick_threshold: 5,
+            ban_threshold: 7,
+            escalation_window_secs: 86_400,
+            escalation_kick_after: 2,
+            escalation_ban_after: 3,
+            announce_actions: true,
+            announce_dm_owner: true,
+            delete_spam_messages: true,
+            dry_run_minutes: 60,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -764,6 +921,55 @@ join = ["abc123"]
         assert_eq!(config.git_monitor.gitlab_host, "https://gitlab.com");
         assert!(config.git_monitor.post_commits);
         assert!(config.git_monitor.post_releases);
+    }
+
+    #[test]
+    fn test_automod_defaults() {
+        let config = BotConfig::default();
+        assert!(!config.automod.enabled); // opt-in, off by default
+        assert!(!config.automod.strict_mode);
+        assert_eq!(config.automod.max_messages, 8);
+        assert_eq!(config.automod.burst_window_secs, 10);
+        assert_eq!(config.automod.max_duplicates, 3);
+        assert_eq!(config.automod.warn_threshold, 3);
+        assert_eq!(config.automod.kick_threshold, 5);
+        assert_eq!(config.automod.ban_threshold, 7);
+        assert_eq!(config.automod.escalation_window_secs, 86_400);
+        assert!(config.automod.link_allowlist.contains(&"github.com".to_string()));
+        assert_eq!(config.automod.dry_run_minutes, 60);
+    }
+
+    #[test]
+    fn test_automod_missing_section_parses() {
+        // A config with no [automod] section should still parse with defaults.
+        let toml_str = r#"
+[bot]
+nsec = "nsec1test..."
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.automod.enabled);
+        assert_eq!(config.automod.max_messages, 8);
+    }
+
+    #[test]
+    fn test_automod_partial_section() {
+        // Partial [automod] section: specified fields override, rest default.
+        let toml_str = r#"
+[bot]
+nsec = "nsec1test..."
+
+[automod]
+enabled = true
+max_messages = 20
+banned_words = ["spamword"]
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.automod.enabled);
+        assert_eq!(config.automod.max_messages, 20);
+        assert_eq!(config.automod.banned_words, vec!["spamword"]);
+        // Unspecified fields keep defaults.
+        assert_eq!(config.automod.kick_threshold, 5);
+        assert_eq!(config.automod.burst_window_secs, 10);
     }
 
     #[test]

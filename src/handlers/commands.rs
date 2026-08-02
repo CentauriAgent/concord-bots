@@ -341,6 +341,22 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
             dispatch_moderation(ctx, msg, command, args).await?;
         }
 
+        "!automod"
+            if features.moderation => {
+            // Base access is Authorized (status/history/list are safe for
+            // authorized users). Owner-gated subcommands (on/off/words add,
+            // allowlist add, reset) are enforced inside automod_command via
+            // the is_owner flag.
+            if !require_auth(ctx, msg, AuthLevel::Authorized).await? {
+                return Ok(());
+            }
+            let is_owner = match ctx.auth {
+                Some(ref auth) => auth.is_owner(&sender_npub(msg)),
+                None => true, // auth disabled → treat everyone as owner (matches other commands)
+            };
+            crate::handlers::automod::automod_command(ctx, msg, args, is_owner).await?;
+        }
+
         "!welcome"
             if features.community => {
             if !require_auth(ctx, msg, AuthLevel::Owner).await? {
@@ -870,6 +886,7 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!welcome", description: "Toggle welcome messages on/off",       feature: Some(Feature::Community), auth: AuthLevel::Owner },
     CommandMeta { name: "!grantmod", description: "Grant admin role",                    feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
     CommandMeta { name: "!revokemod", description: "Revoke admin role",                  feature: Some(Feature::Moderation), auth: AuthLevel::Owner },
+    CommandMeta { name: "!automod",  description: "Auto-mod (on/off/status/words/allowlist/history/reset)", feature: Some(Feature::Moderation), auth: AuthLevel::Authorized },
 
     // Community Engagement
     CommandMeta { name: "!level",     description: "Show your level and XP",               feature: Some(Feature::Community), auth: AuthLevel::Public },
