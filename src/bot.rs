@@ -39,27 +39,37 @@ pub struct BotContext {
     pub git_store: Option<SubscriptionStore>,
     /// Auto-moderation engine (spam detection + auto-kick/ban).
     pub automod: AutoModEngine,
-    /// Last message received timestamp (for deafness watchdog).
-    last_message: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    /// When the bot last heard a message (for the deafness watchdog). Seeded
+    /// with the startup instant so "silence" is well-defined before the first
+    /// message ever arrives — there is no sentinel value to leak into logs.
+    last_message: Arc<std::sync::Mutex<std::time::Instant>>,
 }
 
 impl BotContext {
     /// Record that a message was just received.
     pub fn touch_message(&self) {
         if let Ok(mut t) = self.last_message.lock() {
-            *t = Some(std::time::Instant::now());
+            *t = std::time::Instant::now();
         }
     }
 
-    /// Seconds since the last message, or a huge number if none yet.
+    /// Seconds since the last message — or since startup, if none has arrived.
     pub fn last_message_elapsed_secs(&self) -> u64 {
         match self.last_message.lock() {
-            Ok(guard) => match *guard {
-                Some(t) => t.elapsed().as_secs(),
-                None => u64::MAX,
-            },
-            Err(_) => u64::MAX,
+            Ok(guard) => guard.elapsed().as_secs(),
+            // A poisoned lock means a panic while holding it. Report 0 so the
+            // watchdog stays quiet rather than resubscribing in a tight loop.
+            Err(_) => 0,
         }
+    }
+}
+
+/// Render a silence duration for logs: "8m 20s", "2h 5m".
+fn fmt_silence(secs: u64) -> String {
+    match secs {
+        s if s < 60 => format!("{}s", s),
+        s if s < 3600 => format!("{}m {}s", s / 60, s % 60),
+        s => format!("{}h {}m", s / 3600, (s % 3600) / 60),
     }
 }
 
@@ -296,7 +306,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         community_db,
         git_store,
         automod,
-        last_message: Arc::new(std::sync::Mutex::new(None)),
+        last_message: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
     };
 
     // -------------------------------------------------------------------------
@@ -381,39 +391,94 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // -------------------------------------------------------------------------
     // Step 5a: Deafness watchdog (spawn BEFORE on_event blocks)
     // -------------------------------------------------------------------------
-    // The SDK's on_event() blocks forever (it's the main event loop). We spawn
-    // the watchdog first so it runs independently. It monitors last-message
-    // timestamp and force-refreshes subscriptions if the bot goes deaf.
-    {
+    // The SDK's on_event() blocks forever (it's the main event loop), so the
+    // watchdog is spawned first and runs independently. It force-refreshes
+    // subscriptions when the bot stops hearing messages, working around an SDK
+    // gap where a subscription can close without the relay disconnecting.
+    //
+    // Silence is NOT proof of deafness — a quiet community is indistinguishable
+    // from a broken subscription — so `silence_secs` must sit above the longest
+    // normal gap between messages, and repeat refreshes back off exponentially.
+    if ctx.config.watchdog.enabled {
         let bot_for_watchdog = bot.clone();
         let ctx_for_watchdog = ctx.clone();
+        let wd = ctx.config.watchdog.clone();
+        tracing::info!(
+            "Deafness watchdog armed: refresh after {}s of silence, checked every {}s (backoff to {}s)",
+            wd.silence_secs, wd.check_interval_secs, wd.max_backoff_secs
+        );
         tokio::spawn(async move {
-            // Wait for initial startup to complete
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            use std::time::{Duration, Instant};
+
+            tokio::time::sleep(Duration::from_secs(wd.startup_grace_secs)).await;
+
+            // Refreshes performed since the last real message. Drives the
+            // backoff, and is reset the moment traffic resumes.
+            let mut consecutive: u32 = 0;
+            let mut last_refresh: Option<Instant> = None;
+
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(Duration::from_secs(wd.check_interval_secs.max(1))).await;
 
-                let elapsed = ctx_for_watchdog.last_message_elapsed_secs();
+                let silent_for = ctx_for_watchdog.last_message_elapsed_secs();
 
-                // If no message in 90s (or never received one), force resubscribe
-                if elapsed > 90 {
-                    tracing::warn!(
-                        "watchdog: no messages for {}s — forcing subscription refresh",
-                        elapsed
-                    );
-                    // Directly refresh the community realtime subscriptions
-                    if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
-                        vector_sdk::vector_core::community::v2::realtime::refresh_subscription(&client).await;
-                        vector_sdk::vector_core::community::realtime::refresh_subscription(&client).await;
+                if silent_for < wd.silence_secs {
+                    if consecutive > 0 {
+                        tracing::info!(
+                            "watchdog: traffic resumed after {} refresh attempt(s)",
+                            consecutive
+                        );
                     }
-                    // Also sync communities which retriggers relay subscriptions
-                    bot_for_watchdog.sync_communities().await;
-                    let _ = bot_for_watchdog.sync_dms(None).await;
-                    // Touch so we don't spam refresh every 30s — give it time to work
-                    ctx_for_watchdog.touch_message();
+                    consecutive = 0;
+                    last_refresh = None;
+                    continue;
                 }
+
+                // Still silent. Hold off until the backoff for this attempt has
+                // elapsed, so a genuinely deaf bot doesn't hammer the relays.
+                // Shift is capped at 6 (64x) before max_backoff_secs clamps it.
+                let backoff = wd
+                    .silence_secs
+                    .saturating_mul(1u64 << consecutive.min(6))
+                    .min(wd.max_backoff_secs.max(wd.silence_secs));
+                if let Some(at) = last_refresh {
+                    if at.elapsed().as_secs() < backoff {
+                        continue;
+                    }
+                }
+
+                tracing::warn!(
+                    "watchdog: no messages for {} — forcing subscription refresh \
+                     (attempt {}, next no sooner than {}s)",
+                    fmt_silence(silent_for),
+                    consecutive + 1,
+                    backoff
+                );
+
+                // Directly refresh the community realtime subscriptions.
+                if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
+                    vector_sdk::vector_core::community::v2::realtime::refresh_subscription(&client).await;
+                    vector_sdk::vector_core::community::realtime::refresh_subscription(&client).await;
+                }
+                // Also sync communities + DMs, which retriggers relay subscriptions.
+                if let Err(e) = bot_for_watchdog.sync_communities().await {
+                    tracing::warn!("watchdog: community sync failed: {:?}", e);
+                }
+                if let Err(e) = bot_for_watchdog.sync_dms(None).await {
+                    tracing::warn!("watchdog: DM sync failed: {:?}", e);
+                }
+
+                // Record the refresh WITHOUT touching the message timestamp. The
+                // previous cut called touch_message() here, which made `silent_for`
+                // report the time since the last *refresh* rather than the last
+                // message — so a permanently deaf bot logged the same small number
+                // forever and looked identical to a healthy one.
+                last_refresh = Some(Instant::now());
+                consecutive = consecutive.saturating_add(1);
             }
         });
+    } else {
+        tracing::info!("Deafness watchdog disabled ([watchdog] enabled = false)");
     }
 
     // -------------------------------------------------------------------------
@@ -476,6 +541,46 @@ pub async fn run(config: BotConfig) -> Result<()> {
     ctx.automod.persist().await;
     tracing::info!("Goodbye!");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fmt_silence() {
+        assert_eq!(fmt_silence(0), "0s");
+        assert_eq!(fmt_silence(45), "45s");
+        assert_eq!(fmt_silence(500), "8m 20s");
+        assert_eq!(fmt_silence(7500), "2h 5m");
+    }
+
+    #[test]
+    fn test_watchdog_backoff_growth() {
+        // Mirrors the backoff expression in the watchdog loop.
+        fn backoff(silence: u64, consecutive: u32, max: u64) -> u64 {
+            silence
+                .saturating_mul(1u64 << consecutive.min(6))
+                .min(max.max(silence))
+        }
+        // Doubles per attempt...
+        assert_eq!(backoff(1800, 0, 3600), 1800);
+        assert_eq!(backoff(1800, 1, 3600), 3600);
+        // ...then clamps at max_backoff_secs.
+        assert_eq!(backoff(1800, 2, 3600), 3600);
+        assert_eq!(backoff(1800, 30, 3600), 3600);
+        // A max below silence_secs can't shrink the interval below one window.
+        assert_eq!(backoff(1800, 0, 60), 1800);
+    }
+
+    #[test]
+    fn test_last_message_elapsed_starts_at_zero() {
+        // Seeded with the startup instant, so there is no u64::MAX sentinel to
+        // leak into the log line as "no messages for 18446744073709551615s".
+        let last = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+        let elapsed = last.lock().unwrap().elapsed().as_secs();
+        assert_eq!(elapsed, 0);
+    }
 }
 
 // -----------------------------------------------------------------------------

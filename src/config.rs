@@ -40,6 +40,9 @@ pub struct BotConfig {
     /// Auto-moderation (spam detection + auto-kick/ban) settings.
     #[serde(default)]
     pub automod: AutoModSection,
+    /// Deafness watchdog (forced subscription refresh) settings.
+    #[serde(default)]
+    pub watchdog: WatchdogSection,
     /// Arbitrary key-value pairs for custom handler config.
     #[serde(default)]
     pub custom: Option<toml::Value>,
@@ -721,6 +724,53 @@ pub struct AutoModSection {
     pub dry_run_minutes: u64,
 }
 
+// -----------------------------------------------------------------------------
+// Watchdog section
+// -----------------------------------------------------------------------------
+
+/// Deafness watchdog: force a subscription refresh when the bot stops hearing
+/// messages.
+///
+/// This works around an SDK gap where a relay subscription can be closed without
+/// the connection dropping, leaving the bot silently deaf with no reconnect.
+///
+/// The hard part is that **silence is not evidence of deafness** — a quiet
+/// community looks identical to a broken subscription. `silence_secs` must
+/// therefore sit comfortably above the longest normal gap between messages in
+/// your busiest channel, or the watchdog will resubscribe continuously against a
+/// perfectly healthy bot. Repeat refreshes back off exponentially so a genuinely
+/// deaf bot doesn't hammer relays either.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WatchdogSection {
+    /// Master switch. Default: true.
+    pub enabled: bool,
+    /// Silence, in seconds, before the first forced refresh. Measured from the
+    /// last received message — or from startup, until one arrives.
+    /// Default: 1800 (30 min).
+    pub silence_secs: u64,
+    /// How often to evaluate the silence timer, in seconds. Default: 60.
+    pub check_interval_secs: u64,
+    /// Grace period after startup before the watchdog arms, in seconds.
+    /// Default: 120 — long enough for the initial community sync to finish.
+    pub startup_grace_secs: u64,
+    /// Upper bound on the exponential backoff between repeat refreshes, in
+    /// seconds. Default: 3600 (1 hour).
+    pub max_backoff_secs: u64,
+}
+
+impl Default for WatchdogSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            silence_secs: 1800,
+            check_interval_secs: 60,
+            startup_grace_secs: 120,
+            max_backoff_secs: 3600,
+        }
+    }
+}
+
 fn default_link_allowlist() -> Vec<String> {
     vec![
         "github.com".to_string(),
@@ -928,6 +978,34 @@ join = ["abc123"]
         assert_eq!(config.git_monitor.gitlab_host, "https://gitlab.com");
         assert!(config.git_monitor.post_commits);
         assert!(config.git_monitor.post_releases);
+    }
+
+    #[test]
+    fn test_watchdog_defaults() {
+        let config = BotConfig::default();
+        assert!(config.watchdog.enabled);
+        // Must sit well above a normal quiet gap — the previous 90s threshold
+        // fired continuously against a healthy low-traffic bot.
+        assert_eq!(config.watchdog.silence_secs, 1800);
+        assert_eq!(config.watchdog.check_interval_secs, 60);
+        assert_eq!(config.watchdog.startup_grace_secs, 120);
+        assert_eq!(config.watchdog.max_backoff_secs, 3600);
+    }
+
+    #[test]
+    fn test_watchdog_partial_section() {
+        let toml_str = r#"
+[bot]
+name = "test"
+
+[watchdog]
+silence_secs = 600
+"#;
+        let config: BotConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.watchdog.silence_secs, 600);
+        // Unspecified fields keep their defaults.
+        assert!(config.watchdog.enabled);
+        assert_eq!(config.watchdog.check_interval_secs, 60);
     }
 
     #[test]

@@ -116,6 +116,28 @@ invite_policy = "owner"
 # claim_interval_secs = 300  # poll every 5 minutes
 
 # =============================================================================
+# Deafness watchdog — forced subscription refresh
+# =============================================================================
+#
+# Works around an SDK gap where a relay subscription can close without the
+# connection dropping, leaving the bot silently deaf with no reconnect. When the
+# bot hasn't heard a message for silence_secs, it force-refreshes the v1 + v2
+# realtime subscriptions and re-syncs communities and DMs.
+#
+# IMPORTANT: silence is not proof of deafness — a quiet community looks exactly
+# like a broken subscription. Set silence_secs comfortably ABOVE the longest
+# normal gap between messages in your busiest channel, or the watchdog will
+# resubscribe continuously against a perfectly healthy bot. Check your real gaps
+# with:  journalctl --user -u concord-bots | grep 'Incoming message'
+
+[watchdog]
+# enabled = true
+# silence_secs = 1800        # 30 min of silence before the first refresh
+# check_interval_secs = 60   # how often the timer is evaluated
+# startup_grace_secs = 120   # arm this long after boot (lets initial sync finish)
+# max_backoff_secs = 3600    # repeat refreshes double each time, capped here
+
+# =============================================================================
 # Auto-moderation — spam detection + auto-kick/ban
 # =============================================================================
 #
