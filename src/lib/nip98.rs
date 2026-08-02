@@ -15,23 +15,24 @@ pub async fn build_auth_header(
 ) -> Result<String> {
     let keys = Keys::parse(nsec).context("Failed to parse nsec")?;
 
+    // nostr 0.45 dropped `TagKind`; tags are built from their raw string form.
     let mut tags: Vec<Tag> = vec![
-        Tag::custom(TagKind::custom("u"), vec![url.to_string()]),
-        Tag::custom(TagKind::custom("method"), vec![method.to_string()]),
+        Tag::parse(["u", url]).context("Failed to build NIP-98 u tag")?,
+        Tag::parse(["method", method]).context("Failed to build NIP-98 method tag")?,
     ];
 
     if let Some(body) = payload {
         let hash = Sha256::digest(body);
-        tags.push(Tag::custom(
-            TagKind::custom("payload"),
-            vec![hex::encode(hash)],
-        ));
+        tags.push(
+            Tag::parse(["payload", &hex::encode(hash)])
+                .context("Failed to build NIP-98 payload tag")?,
+        );
     }
 
+    // 0.45 replaced the async `sign()` with a synchronous `finalize()`.
     let event = EventBuilder::new(Kind::Custom(27235), "")
         .tags(tags)
-        .sign(&keys)
-        .await
+        .finalize(&keys)
         .context("Failed to sign NIP-98 event")?;
 
     let json = serde_json::to_string(&event).context("Failed to serialize NIP-98 event")?;

@@ -615,7 +615,8 @@ async fn publish_profile_with_lud16(
     if !banner.is_empty() { meta["banner"] = serde_json::Value::String(banner.to_string()); }
     if !lud16.is_empty() { meta["lud16"] = serde_json::Value::String(lud16.to_string()); }
 
-    let event = match EventBuilder::new(Kind::Metadata, meta.to_string()).sign(&keys).await {
+    // nostr 0.45 replaced the async `sign()` with a synchronous `finalize()`.
+    let event = match EventBuilder::new(Kind::Metadata, meta.to_string()).finalize(&keys) {
         Ok(e) => e,
         Err(e) => { tracing::warn!("Failed to sign kind 0: {:?}", e); return false; }
     };

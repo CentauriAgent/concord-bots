@@ -173,7 +173,7 @@ async fn send_comment(ctx: &BotContext, msg: &IncomingMessage, text: &str) -> Re
         &rumor,
         &group,
         &author_keys,
-        nostr_sdk::Timestamp::from_secs(at_ms / 1000),
+        nostr_sdk::prelude::Timestamp::from_secs(at_ms / 1000),
         false, // not ephemeral
     )
     .map_err(|e| format!("seal_chat_rumor: {e}"))?;
