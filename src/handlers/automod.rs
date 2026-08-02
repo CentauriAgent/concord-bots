@@ -190,6 +190,8 @@ struct Inner {
     started_at: Instant,
     /// Last time state was flushed to disk (unix secs).
     last_persist: RwLock<u64>,
+    /// Manual dry-run override: Some(true)=force on, Some(false)=force off, None=auto.
+    forced_dry_run: RwLock<Option<bool>>,
 }
 
 impl AutoModEngine {
@@ -227,6 +229,7 @@ impl AutoModEngine {
                 state: RwLock::new(state),
                 started_at: Instant::now(),
                 last_persist: RwLock::new(now_secs()),
+                forced_dry_run: RwLock::new(None),
             }),
         }
     }
@@ -241,10 +244,23 @@ impl AutoModEngine {
         *self.inner.enabled.write().await = on;
     }
 
-    /// True while still inside the dry-run (log-only) window after enabling.
-    pub fn in_dry_run(&self, cfg: &AutoModSection) -> bool {
-        cfg.dry_run_minutes > 0
-            && self.inner.started_at.elapsed().as_secs() < cfg.dry_run_minutes * 60
+    /// True while in dry-run (log-only) mode — either time-based or manually forced.
+    pub async fn in_dry_run(&self, cfg: &AutoModSection) -> bool {
+        let forced = *self.inner.forced_dry_run.read().await;
+        match forced {
+            Some(true) => true,
+            Some(false) => false,
+            None => {
+                cfg.dry_run_minutes > 0
+                    && self.inner.started_at.elapsed().as_secs() < cfg.dry_run_minutes * 60
+            }
+        }
+    }
+
+    /// Manually set dry-run override.
+    /// `Some(true)` = force on, `Some(false)` = force off, `None` = auto (time-based).
+    pub async fn set_dry_run(&self, mode: Option<bool>) {
+        *self.inner.forced_dry_run.write().await = mode;
     }
 
     // ---- banned words -----------------------------------------------------
@@ -611,7 +627,7 @@ impl AutoModEngine {
             score,
             rules_triggered: rules,
             action,
-            dry_run: self.in_dry_run(cfg),
+            dry_run: self.in_dry_run(cfg).await,
         }
     }
 
@@ -679,6 +695,15 @@ impl AutoModEngine {
                 verdict.score,
                 rules_joined
             );
+            // Announce in-channel so operators can see what WOULD be flagged.
+            let dry_msg = format!(
+                "🟡 **DRY-RUN** — would {} {} (score: {}, rules: {}) — no action taken",
+                verdict.action.as_str(),
+                short_npub(npub),
+                verdict.score,
+                rules_joined
+            );
+            let _ = ctx.bot.channel(msg.chat_id.clone()).send(&dry_msg).await;
             self.maybe_persist().await;
             return true;
         }
@@ -1060,7 +1085,7 @@ pub async fn automod_command(
             let on = sub == "on";
             engine.set_enabled(on).await;
             let state = if on { "ON ✅" } else { "OFF ❌" };
-            let extra = if on && engine.in_dry_run(cfg) {
+            let extra = if on && engine.in_dry_run(cfg).await {
                 format!(
                     "\n⚠️ Running in DRY-RUN (log-only) for {} min from bot start — no kicks/bans yet.",
                     cfg.dry_run_minutes
@@ -1071,16 +1096,72 @@ pub async fn automod_command(
             super::reply(ctx, msg, &format!("🛡️ Auto-mod turned {}{}", state, extra)).await?;
         }
 
+        "dryrun" => {
+            let action = parts.get(1).copied().unwrap_or("");
+            match action {
+                "on" => {
+                    if !is_owner {
+                        super::reply(ctx, msg, "⛔ Owner only.").await?;
+                        return Ok(());
+                    }
+                    engine.set_dry_run(Some(true)).await;
+                    super::reply(ctx, msg, "🟡 Dry-run FORCED ON — automod will log + announce in channel but take no real action until you turn it off.").await?;
+                }
+                "off" => {
+                    if !is_owner {
+                        super::reply(ctx, msg, "⛔ Owner only.").await?;
+                        return Ok(());
+                    }
+                    engine.set_dry_run(Some(false)).await;
+                    super::reply(ctx, msg, "🔴 Dry-run FORCED OFF — automod is now LIVE and will take real action.").await?;
+                }
+                "auto" => {
+                    if !is_owner {
+                        super::reply(ctx, msg, "⛔ Owner only.").await?;
+                        return Ok(());
+                    }
+                    engine.set_dry_run(None).await;
+                    super::reply(ctx, msg, &format!("🔄 Dry-run reset to auto (time-based: first {} min from bot start).", cfg.dry_run_minutes)).await?;
+                }
+                "" | "status" => {
+                    let forced = *engine.inner.forced_dry_run.read().await;
+                    let time_based = engine.in_dry_run(cfg).await;
+                    let mode = match forced {
+                        Some(true) => "FORCED ON (manual)",
+                        Some(false) => "FORCED OFF (manual)",
+                        None => if time_based { "ON (time-based)" } else { "OFF (time-based window expired)" },
+                    };
+                    super::reply(ctx, msg, &format!("🟡 Dry-run: {}\n• !automod dryrun on — force on\n• !automod dryrun off — force off (go live)\n• !automod dryrun auto — reset to time-based", mode)).await?;
+                }
+                _ => {
+                    super::reply(ctx, msg, "Usage: !automod dryrun <on|off|auto|status>").await?;
+                }
+            }
+        }
+
         "status" | "" => {
             let enabled = engine.is_enabled().await;
             let (tracked, warns, kicks, bans) = engine.stats().await;
             let words = engine.list_words().await;
             let patterns = engine.list_patterns().await;
             let allow = engine.list_allowlist().await;
-            let dry = if enabled && engine.in_dry_run(cfg) { " (DRY-RUN)" } else { "" };
+            let forced = *engine.inner.forced_dry_run.read().await;
+            let dry_label = match forced {
+                Some(true) => "FORCED ON (manual)".to_string(),
+                Some(false) => "OFF (forced)".to_string(),
+                None => {
+                    if engine.in_dry_run(cfg).await {
+                        format!("ON ({}min window)", cfg.dry_run_minutes)
+                    } else {
+                        "OFF (expired)".to_string()
+                    }
+                }
+            };
+            let dry = if enabled && engine.in_dry_run(cfg).await { " (DRY-RUN)" } else { "" };
             let text = format!(
                 "🛡️ Auto-mod status: {}{}\n\
-                 • strict_mode: {}\n\
+                 • strict_mode: {}
+                 • dry-run: {}\n\
                  • burst: {} msgs / {}s\n\
                  • duplicates: {} / {}s\n\
                  • max_links: {} (action: {}), max_mentions: {}\n\
@@ -1093,6 +1174,7 @@ pub async fn automod_command(
                 if enabled { "ENABLED ✅" } else { "disabled ❌" },
                 dry,
                 cfg.strict_mode,
+                dry_label,
                 cfg.max_messages, cfg.burst_window_secs,
                 cfg.max_duplicates, cfg.dedupe_window_secs,
                 cfg.max_links, cfg.link_action, cfg.max_mentions,
@@ -1263,8 +1345,9 @@ pub async fn automod_command(
             super::reply(
                 ctx,
                 msg,
-                "Usage: !automod <on|off|status|words|allowlist|history|reset>\n\
+                "Usage: !automod <on|off|dryrun|status|words|allowlist|history|reset>\n\
                  • !automod on/off — toggle (owner)\n\
+                 • !automod dryrun <on|off|auto|status> — control dry-run mode (owner)\n\
                  • !automod status — config + stats\n\
                  • !automod words <add|remove|list> [word] (owner to modify)\n\
                  • !automod allowlist <add|remove|list> [domain] (owner to modify)\n\
