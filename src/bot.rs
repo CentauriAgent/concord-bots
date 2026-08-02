@@ -376,12 +376,52 @@ pub async fn run(config: BotConfig) -> Result<()> {
     tracing::info!("Community sync complete.");
 
     // -------------------------------------------------------------------------
-    // Step 5: Event loop (handles BOTH messages AND member joins)
+    // Step 5a: Deafness watchdog (spawn BEFORE on_event blocks)
+    // -------------------------------------------------------------------------
+    // The SDK's on_event() blocks forever (it's the main event loop). We spawn
+    // the watchdog first so it runs independently. It monitors last-message
+    // timestamp and force-refreshes subscriptions if the bot goes deaf.
+    {
+        let bot_for_watchdog = bot.clone();
+        let ctx_for_watchdog = ctx.clone();
+        tokio::spawn(async move {
+            // Wait for initial startup to complete
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+                let elapsed = ctx_for_watchdog.last_message_elapsed_secs();
+
+                // If no message in 90s (or never received one), force resubscribe
+                if elapsed > 90 {
+                    tracing::warn!(
+                        "watchdog: no messages for {}s — forcing subscription refresh",
+                        elapsed
+                    );
+                    // Directly refresh the community realtime subscriptions
+                    if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
+                        vector_sdk::vector_core::community::v2::realtime::refresh_subscription(&client).await;
+                        vector_sdk::vector_core::community::realtime::refresh_subscription(&client).await;
+                    }
+                    // Also sync communities which retriggers relay subscriptions
+                    bot_for_watchdog.sync_communities().await;
+                    let _ = bot_for_watchdog.sync_dms(None).await;
+                    // Touch so we don't spam refresh every 30s — give it time to work
+                    ctx_for_watchdog.touch_message();
+                }
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 5b: Event loop (handles BOTH messages AND member joins)
     // -------------------------------------------------------------------------
     // Use on_event — it's a superset of on_message. Messages arrive as
     // BotEvent::Message(IncomingMessage), joins as BotEvent::MemberJoin, etc.
     // We must NOT also register on_message — both call core.listen() and only
     // the first registration runs (see commit c51e4b3).
+
+    tracing::info!("Registering on_event handler with SDK...");
 
     bot.on_event({
         let ctx = ctx.clone();
@@ -424,50 +464,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
     .context("Failed to register on_event handler")?;
 
     tracing::info!("Bot is running. Press Ctrl+C to stop.");
-
-    // -------------------------------------------------------------------------
-    // Step 6: Deafness watchdog
-    // -------------------------------------------------------------------------
-    // The SDK's relay subscriptions can silently die when relays timeout,
-    // auto-close, or go zombie. The SDK has reconnect-driven resubscribe, but
-    // if a subscription auto-closes WITHOUT a relay disconnect, the monitor
-    // never fires and the bot goes permanently deaf.
-    //
-    // This watchdog tracks the last message timestamp. If no message arrives
-    // for 90s, it force-refreshes the v2 community subscriptions and syncs.
-    // We use the vector_core internals directly because the SDK's own
-    // reconnect-driven resubscribe misses auto-close-without-disconnect cases.
-    {
-        let bot_for_watchdog = bot.clone();
-        let ctx_for_watchdog = ctx.clone();
-        tokio::spawn(async move {
-            // Wait for initial startup to complete
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-
-                let elapsed = ctx_for_watchdog.last_message_elapsed_secs();
-
-                // If no message in 90s (or never received one), force resubscribe
-                if elapsed > 90 {
-                    tracing::warn!(
-                        "watchdog: no messages for {}s — forcing subscription refresh",
-                        elapsed
-                    );
-                    // Directly refresh the community realtime subscriptions
-                    if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
-                        vector_sdk::vector_core::community::v2::realtime::refresh_subscription(&client).await;
-                        vector_sdk::vector_core::community::realtime::refresh_subscription(&client).await;
-                    }
-                    // Also sync communities which retriggers relay subscriptions
-                    bot_for_watchdog.sync_communities().await;
-                    let _ = bot_for_watchdog.sync_dms(None).await;
-                    // Touch so we don't spam refresh every 30s — give it time to work
-                    ctx_for_watchdog.touch_message();
-                }
-            }
-        });
-    }
 
     tokio::signal::ctrl_c()
         .await
