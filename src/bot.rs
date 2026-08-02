@@ -39,6 +39,28 @@ pub struct BotContext {
     pub git_store: Option<SubscriptionStore>,
     /// Auto-moderation engine (spam detection + auto-kick/ban).
     pub automod: AutoModEngine,
+    /// Last message received timestamp (for deafness watchdog).
+    last_message: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+}
+
+impl BotContext {
+    /// Record that a message was just received.
+    pub fn touch_message(&self) {
+        if let Ok(mut t) = self.last_message.lock() {
+            *t = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Seconds since the last message, or a huge number if none yet.
+    pub fn last_message_elapsed_secs(&self) -> u64 {
+        match self.last_message.lock() {
+            Ok(guard) => match *guard {
+                Some(t) => t.elapsed().as_secs(),
+                None => u64::MAX,
+            },
+            Err(_) => u64::MAX,
+        }
+    }
 }
 
 /// Build the bot from config, register handlers, and run forever.
@@ -271,6 +293,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         community_db,
         git_store,
         automod,
+        last_message: Arc::new(std::sync::Mutex::new(None)),
     };
 
     // -------------------------------------------------------------------------
@@ -372,6 +395,9 @@ pub async fn run(config: BotConfig) -> Result<()> {
                             return;
                         }
 
+                        // Update last-message timestamp for watchdog.
+                        ctx.touch_message();
+
                         tracing::info!(
                             "Incoming message from {} (npub={:?}): {}",
                             msg.chat_id,
@@ -398,6 +424,42 @@ pub async fn run(config: BotConfig) -> Result<()> {
     .context("Failed to register on_event handler")?;
 
     tracing::info!("Bot is running. Press Ctrl+C to stop.");
+
+    // -------------------------------------------------------------------------
+    // Step 6: Deafness watchdog
+    // -------------------------------------------------------------------------
+    // The SDK's relay subscriptions can silently die when relays timeout,
+    // auto-close, or go zombie. The SDK has reconnect-driven resubscribe, but
+    // if a subscription auto-closes WITHOUT a relay disconnect, the monitor
+    // never fires and the bot goes permanently deaf.
+    //
+    // This watchdog tracks the last message timestamp. If no message arrives
+    // for WATCHDOG_SECS, it force-calls sync_communities() which rebuilds
+    // the subscription state. Cheap insurance.
+    {
+        let bot_for_watchdog = bot.clone();
+        let ctx_for_watchdog = ctx.clone();
+        tokio::spawn(async move {
+            // Wait for initial startup to complete
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+                let elapsed = ctx_for_watchdog.last_message_elapsed_secs();
+
+                // If no message in 3 minutes, force a resync
+                if elapsed > 180 {
+                    tracing::warn!(
+                        "watchdog: no messages for {}s — forcing community resync",
+                        elapsed
+                    );
+                    bot_for_watchdog.sync_communities().await;
+                    // Also try syncing DMs which retriggers relay subscriptions
+                    let _ = bot_for_watchdog.sync_dms(None).await;
+                }
+            }
+        });
+    }
 
     tokio::signal::ctrl_c()
         .await
