@@ -177,7 +177,8 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
     // a message, we return early so the command (if any) is never dispatched.
     // Only community messages are checked; DMs and the bot's own messages are
     // skipped. Immune users (owner/admins/authorized) bypass everything.
-    if ctx.config.automod.enabled && msg.is_group {
+    let automod_on = ctx.config.automod.enabled || ctx.automod.is_enabled().await;
+    if automod_on && msg.is_group {
         if let Some(ref npub) = msg.message.npub {
             if !npub.is_empty()
                 && npub != ctx.bot.npub()
@@ -279,7 +280,9 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
 
             // Auto-mod: record join time for new-user flooding protection
             // (skip the bot itself).
-            if ctx.config.automod.enabled && npub != ctx.bot.npub() {
+            if (ctx.config.automod.enabled || ctx.automod.is_enabled().await)
+                && npub != ctx.bot.npub()
+            {
                 ctx.automod.record_join(npub).await;
             }
 
@@ -330,7 +333,9 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
             tracing::info!("Member {} left channel {}", npub, channel_id);
 
             // Auto-mod: drop tracking state for members who leave.
-            if ctx.config.automod.enabled && npub != ctx.bot.npub() {
+            if (ctx.config.automod.enabled || ctx.automod.is_enabled().await)
+                && npub != ctx.bot.npub()
+            {
                 ctx.automod.forget_user(npub).await;
             }
         }
