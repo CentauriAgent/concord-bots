@@ -177,11 +177,18 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
     // a message, we return early so the command (if any) is never dispatched.
     // Only community messages are checked; DMs and the bot's own messages are
     // skipped. Immune users (owner/admins/authorized) bypass everything.
-    let automod_on = ctx.config.automod.enabled || ctx.automod.is_enabled().await;
-    if automod_on && msg.is_group {
+    //
+    // The engine's own `enabled` flag is authoritative (it's seeded from
+    // config.automod.enabled and persisted across restarts), so we don't also
+    // consult the TOML value here — doing so would let a stale `enabled = true`
+    // in bot.toml keep feeding messages to an engine the operator turned off.
+    if msg.is_group && ctx.automod.is_enabled().await {
         if let Some(ref npub) = msg.message.npub {
             if !npub.is_empty()
                 && npub != ctx.bot.npub()
+                // Respect !disable — a channel the bot was told to stay out of
+                // shouldn't get its messages deleted or its members kicked.
+                && ctx.community_db.is_channel_enabled(&msg.chat_id).unwrap_or(true)
                 && automod::on_message(ctx, msg, npub).await
             {
                 // Message was handled by auto-mod — stop here.
@@ -280,9 +287,7 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
 
             // Auto-mod: record join time for new-user flooding protection
             // (skip the bot itself).
-            if (ctx.config.automod.enabled || ctx.automod.is_enabled().await)
-                && npub != ctx.bot.npub()
-            {
+            if ctx.automod.is_enabled().await && npub != ctx.bot.npub() {
                 ctx.automod.record_join(npub).await;
             }
 
@@ -332,11 +337,11 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MemberLeave { channel_id, npub } => {
             tracing::info!("Member {} left channel {}", npub, channel_id);
 
-            // Auto-mod: drop tracking state for members who leave.
-            if (ctx.config.automod.enabled || ctx.automod.is_enabled().await)
-                && npub != ctx.bot.npub()
-            {
-                ctx.automod.forget_user(npub).await;
+            // Auto-mod: clear transient tracking for members who leave, but keep
+            // their violation history — a kick emits MemberLeave, so wiping it
+            // here would reset the offender's escalation counter every time.
+            if ctx.automod.is_enabled().await && npub != ctx.bot.npub() {
+                ctx.automod.on_member_leave(npub).await;
             }
         }
 

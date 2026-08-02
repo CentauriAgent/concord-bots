@@ -25,7 +25,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -44,12 +43,22 @@ fn state_file() -> PathBuf {
     PathBuf::from("data/automod-state.json")
 }
 
+/// Runtime-tunable settings that `!automod` mutates. Persisted separately from
+/// per-user state so operator changes survive a restart (config TOML only seeds
+/// the *initial* values).
+fn runtime_config_file() -> PathBuf {
+    PathBuf::from("data/automod-config.json")
+}
+
 fn audit_log_file() -> PathBuf {
     PathBuf::from("data/automod-log.json")
 }
 
 /// How often (seconds) state is flushed to disk from the hot path.
 const PERSIST_INTERVAL_SECS: u64 = 60;
+
+/// How often the background flusher writes per-user state to disk.
+const BACKGROUND_PERSIST_SECS: u64 = 300;
 
 // -----------------------------------------------------------------------------
 // Shared regexes (compiled once)
@@ -102,6 +111,11 @@ pub struct AutoModVerdict {
     pub action: AutoModAction,
     /// True if the engine is in dry-run mode — the caller should NOT enforce.
     pub dry_run: bool,
+    /// True when an equal-or-stronger action was already taken against this user
+    /// inside `action_cooldown_secs`. The message is still deleted, but the
+    /// kick/ban call, announcements, and counters are skipped so a concurrent
+    /// spam burst produces one action, not one per message.
+    pub suppressed: bool,
 }
 
 impl AutoModVerdict {
@@ -148,6 +162,35 @@ struct UserRecord {
     /// Number of messages sent since joining (during grace window).
     #[serde(default)]
     msgs_since_join: u32,
+    /// The last action resolved for this user: (unix secs, action). Drives the
+    /// `action_cooldown_secs` de-duplication for concurrent message bursts.
+    #[serde(default)]
+    last_action: Option<(u64, String)>,
+}
+
+/// Runtime-tunable settings persisted across restarts.
+///
+/// The TOML `[automod]` section seeds these on first run; after that this file
+/// wins, so `!automod on`, `!automod dryrun off`, `!automod words add …` and
+/// friends survive a restart. Delete `data/automod-config.json` to fall back to
+/// the TOML values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuntimeConfig {
+    enabled: bool,
+    /// Manual dry-run override: Some(true)=force on, Some(false)=force off, None=auto.
+    #[serde(default)]
+    forced_dry_run: Option<bool>,
+    /// Unix secs when auto-mod was last switched from off → on. The automatic
+    /// dry-run window is measured from here (NOT from process start), so a
+    /// restart doesn't silently put a live engine back into log-only mode.
+    #[serde(default)]
+    enabled_at: Option<u64>,
+    #[serde(default)]
+    banned_words: Vec<String>,
+    #[serde(default)]
+    banned_patterns: Vec<String>,
+    #[serde(default)]
+    link_allowlist: Vec<String>,
 }
 
 /// The full persisted state.
@@ -186,22 +229,71 @@ struct Inner {
     link_allowlist: RwLock<Vec<String>>,
     /// Per-user state (persisted).
     state: RwLock<AutoModState>,
-    /// When the engine was constructed (drives the dry-run window).
-    started_at: Instant,
+    /// Unix secs when auto-mod was last switched on — drives the automatic
+    /// dry-run window. Persisted, so the window expires an hour after the
+    /// operator enabled auto-mod rather than an hour after every restart.
+    enabled_at: RwLock<Option<u64>>,
     /// Last time state was flushed to disk (unix secs).
     last_persist: RwLock<u64>,
     /// Manual dry-run override: Some(true)=force on, Some(false)=force off, None=auto.
     forced_dry_run: RwLock<Option<bool>>,
+    /// False for test engines, so a test run can't read or clobber the real
+    /// `data/automod-*.json` files.
+    persist_to_disk: bool,
 }
 
 impl AutoModEngine {
     /// Build the engine from config. Compiles regex patterns (bad patterns are
     /// logged + skipped, never fatal) and loads persisted state if present.
+    ///
+    /// The TOML `[automod]` section seeds the runtime-tunable lists and the
+    /// enabled flag; if `data/automod-config.json` exists it overrides them, so
+    /// `!automod` changes made by an operator survive a restart.
     pub fn new(cfg: &AutoModSection) -> Self {
+        Self::build(cfg, load_runtime_config(), load_state(), true)
+    }
+
+    /// Build an engine that never touches disk — for tests, so a developer's
+    /// real `data/automod-*.json` files can't leak into (or be clobbered by) a
+    /// test run.
+    #[cfg(test)]
+    fn new_ephemeral(cfg: &AutoModSection) -> Self {
+        Self::build(cfg, None, AutoModState::default(), false)
+    }
+
+    fn build(
+        cfg: &AutoModSection,
+        saved: Option<RuntimeConfig>,
+        state: AutoModState,
+        persist_to_disk: bool,
+    ) -> Self {
+        let enabled = saved.as_ref().map(|s| s.enabled).unwrap_or(cfg.enabled);
+        let forced_dry_run = saved.as_ref().and_then(|s| s.forced_dry_run);
+        // No persisted enable-time but auto-mod is on → treat "now" as the start
+        // of the dry-run window (first boot with `enabled = true` in TOML).
+        let enabled_at = match saved.as_ref().and_then(|s| s.enabled_at) {
+            Some(t) => Some(t),
+            None if enabled => Some(now_secs()),
+            None => None,
+        };
+
+        let word_src: Vec<String> = match saved.as_ref() {
+            Some(s) => s.banned_words.clone(),
+            None => cfg.banned_words.clone(),
+        };
+        let pattern_src: Vec<String> = match saved.as_ref() {
+            Some(s) => s.banned_patterns.clone(),
+            None => cfg.banned_patterns.clone(),
+        };
+        let allowlist: Vec<String> = match saved.as_ref() {
+            Some(s) => s.link_allowlist.clone(),
+            None => cfg.link_allowlist.clone(),
+        };
+
         // Compile patterns; skip (with a warning) any that fail.
         let mut patterns = Vec::new();
         let mut pattern_sources = Vec::new();
-        for p in &cfg.banned_patterns {
+        for p in &pattern_src {
             match Regex::new(p) {
                 Ok(re) => {
                     patterns.push(re);
@@ -213,25 +305,68 @@ impl AutoModEngine {
             }
         }
 
-        let banned_words: Vec<String> =
-            cfg.banned_words.iter().map(|w| w.to_lowercase()).collect();
+        let banned_words: Vec<String> = word_src.iter().map(|w| w.to_lowercase()).collect();
 
-        // Load persisted state (corrupt/missing → fresh start).
-        let state = load_state();
+        if saved.is_some() {
+            tracing::info!(
+                "automod: loaded runtime config (enabled={}, dry_run_override={:?}, words={}, patterns={}, allowlist={})",
+                enabled,
+                forced_dry_run,
+                banned_words.len(),
+                patterns.len(),
+                allowlist.len()
+            );
+        }
 
         Self {
             inner: Arc::new(Inner {
-                enabled: RwLock::new(cfg.enabled),
+                enabled: RwLock::new(enabled),
                 banned_words: RwLock::new(banned_words),
                 patterns: RwLock::new(patterns),
                 pattern_sources: RwLock::new(pattern_sources),
-                link_allowlist: RwLock::new(cfg.link_allowlist.clone()),
+                link_allowlist: RwLock::new(allowlist),
                 state: RwLock::new(state),
-                started_at: Instant::now(),
+                enabled_at: RwLock::new(enabled_at),
                 last_persist: RwLock::new(now_secs()),
-                forced_dry_run: RwLock::new(None),
+                forced_dry_run: RwLock::new(forced_dry_run),
+                persist_to_disk,
             }),
         }
+    }
+
+    /// Snapshot the runtime-tunable settings and write them to disk. Called
+    /// after every `!automod` mutation so operator changes survive a restart.
+    async fn save_runtime(&self) {
+        if !self.inner.persist_to_disk {
+            return;
+        }
+        let cfg = RuntimeConfig {
+            enabled: *self.inner.enabled.read().await,
+            forced_dry_run: *self.inner.forced_dry_run.read().await,
+            enabled_at: *self.inner.enabled_at.read().await,
+            banned_words: self.inner.banned_words.read().await.clone(),
+            banned_patterns: self.inner.pattern_sources.read().await.clone(),
+            link_allowlist: self.inner.link_allowlist.read().await.clone(),
+        };
+        save_runtime_config(&cfg);
+    }
+
+    /// Spawn a background task that flushes per-user state to disk periodically.
+    ///
+    /// Without this, state is only written when an enforcement action fires, so
+    /// join times (needed for the new-user flooding rule) and recent message
+    /// history are lost on a clean restart.
+    pub fn spawn_persistence_task(&self) {
+        let engine = self.clone();
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(BACKGROUND_PERSIST_SECS));
+            ticker.tick().await; // the first tick fires immediately — skip it
+            loop {
+                ticker.tick().await;
+                engine.persist().await;
+            }
+        });
     }
 
     // ---- runtime toggles --------------------------------------------------
@@ -241,7 +376,18 @@ impl AutoModEngine {
     }
 
     pub async fn set_enabled(&self, on: bool) {
-        *self.inner.enabled.write().await = on;
+        let was = {
+            let mut enabled = self.inner.enabled.write().await;
+            let was = *enabled;
+            *enabled = on;
+            was
+        };
+        // Start the automatic dry-run window on the off → on transition only, so
+        // toggling an already-live engine doesn't re-arm log-only mode.
+        if on && !was {
+            *self.inner.enabled_at.write().await = Some(now_secs());
+        }
+        self.save_runtime().await;
     }
 
     /// True while in dry-run (log-only) mode — either time-based or manually forced.
@@ -251,8 +397,13 @@ impl AutoModEngine {
             Some(true) => true,
             Some(false) => false,
             None => {
-                cfg.dry_run_minutes > 0
-                    && self.inner.started_at.elapsed().as_secs() < cfg.dry_run_minutes * 60
+                if cfg.dry_run_minutes == 0 {
+                    return false;
+                }
+                match *self.inner.enabled_at.read().await {
+                    Some(at) => now_secs().saturating_sub(at) < cfg.dry_run_minutes * 60,
+                    None => false,
+                }
             }
         }
     }
@@ -261,6 +412,7 @@ impl AutoModEngine {
     /// `Some(true)` = force on, `Some(false)` = force off, `None` = auto (time-based).
     pub async fn set_dry_run(&self, mode: Option<bool>) {
         *self.inner.forced_dry_run.write().await = mode;
+        self.save_runtime().await;
     }
 
     // ---- banned words -----------------------------------------------------
@@ -270,20 +422,29 @@ impl AutoModEngine {
         if w.is_empty() {
             return false;
         }
-        let mut words = self.inner.banned_words.write().await;
-        if words.iter().any(|x| x == &w) {
-            return false;
+        {
+            let mut words = self.inner.banned_words.write().await;
+            if words.iter().any(|x| x == &w) {
+                return false;
+            }
+            words.push(w);
         }
-        words.push(w);
+        self.save_runtime().await;
         true
     }
 
     pub async fn remove_word(&self, word: &str) -> bool {
         let w = word.trim().to_lowercase();
-        let mut words = self.inner.banned_words.write().await;
-        let before = words.len();
-        words.retain(|x| x != &w);
-        words.len() != before
+        let changed = {
+            let mut words = self.inner.banned_words.write().await;
+            let before = words.len();
+            words.retain(|x| x != &w);
+            words.len() != before
+        };
+        if changed {
+            self.save_runtime().await;
+        }
+        changed
     }
 
     pub async fn list_words(&self) -> Vec<String> {
@@ -297,20 +458,29 @@ impl AutoModEngine {
         if d.is_empty() {
             return false;
         }
-        let mut list = self.inner.link_allowlist.write().await;
-        if list.iter().any(|x| x.to_lowercase() == d) {
-            return false;
+        {
+            let mut list = self.inner.link_allowlist.write().await;
+            if list.iter().any(|x| x.to_lowercase() == d) {
+                return false;
+            }
+            list.push(d);
         }
-        list.push(d);
+        self.save_runtime().await;
         true
     }
 
     pub async fn remove_allowlist(&self, domain: &str) -> bool {
         let d = domain.trim().to_lowercase();
-        let mut list = self.inner.link_allowlist.write().await;
-        let before = list.len();
-        list.retain(|x| x.to_lowercase() != d);
-        list.len() != before
+        let changed = {
+            let mut list = self.inner.link_allowlist.write().await;
+            let before = list.len();
+            list.retain(|x| x.to_lowercase() != d);
+            list.len() != before
+        };
+        if changed {
+            self.save_runtime().await;
+        }
+        changed
     }
 
     pub async fn list_allowlist(&self) -> Vec<String> {
@@ -332,10 +502,25 @@ impl AutoModEngine {
         rec.msgs_since_join = 0;
     }
 
-    /// Forget a user's tracking state (e.g. when they leave).
-    pub async fn forget_user(&self, npub: &str) {
+    /// A member left (or was kicked from) a channel.
+    ///
+    /// Clears the transient buffers — recent messages and the new-user grace
+    /// counters — but deliberately KEEPS the violation history. A kick emits a
+    /// `MemberLeave`, so dropping violations here would reset the offender's
+    /// escalation counter every time they were kicked: they could rejoin, spam,
+    /// get kicked, and never escalate to a ban. Violations age out on their own
+    /// via `escalation_window_secs`.
+    pub async fn on_member_leave(&self, npub: &str) {
         let mut state = self.inner.state.write().await;
-        state.users.remove(npub);
+        if let Some(rec) = state.users.get_mut(npub) {
+            rec.messages.clear();
+            rec.join_time = None;
+            rec.msgs_since_join = 0;
+            // Drop users with nothing left worth remembering.
+            if rec.violations.is_empty() {
+                state.users.remove(npub);
+            }
+        }
     }
 
     /// Reset a user's violation history (but keep them tracked).
@@ -346,6 +531,7 @@ impl AutoModEngine {
             rec.violations.clear();
             rec.messages.clear();
             rec.msgs_since_join = 0;
+            rec.last_action = None;
             return had;
         }
         false
@@ -512,7 +698,7 @@ impl AutoModEngine {
             let words = self.inner.banned_words.read().await;
             let mut keyword_hits = 0u32;
             for w in words.iter() {
-                if !w.is_empty() && lower.contains(w.as_str()) {
+                if contains_banned_word(&lower, w) {
                     keyword_hits += 1;
                 }
             }
@@ -590,22 +776,23 @@ impl AutoModEngine {
             AutoModAction::None
         };
 
-        // --- Escalation (only when there's a real, actionable violation) ---
+        // --- Escalation + violation recording (one critical section) -------
+        //
+        // Messages are dispatched one tokio task each, so counting prior
+        // violations and appending this one MUST happen under a single write
+        // lock. Doing the count here and the append in execute_action (as an
+        // earlier cut did) let a concurrent burst all observe `prior == 0`,
+        // so escalation never fired against exactly the spam it exists for.
+        let mut suppressed = false;
         if action != AutoModAction::None {
-            // Count prior violations still inside the escalation window.
-            let prior = {
-                let state = self.inner.state.read().await;
-                state
-                    .users
-                    .get(npub)
-                    .map(|r| {
-                        r.violations
-                            .iter()
-                            .filter(|v| now.saturating_sub(v.at) <= cfg.escalation_window_secs)
-                            .count() as u32
-                    })
-                    .unwrap_or(0)
-            };
+            let mut state = self.inner.state.write().await;
+            let rec = state.users.entry(npub.to_string()).or_default();
+
+            let prior = rec
+                .violations
+                .iter()
+                .filter(|v| now.saturating_sub(v.at) <= cfg.escalation_window_secs)
+                .count() as u32;
             // This is the (prior + 1)-th violation in the window.
             let this_violation_number = prior + 1;
             if cfg.escalation_ban_after > 0 && this_violation_number >= cfg.escalation_ban_after {
@@ -621,6 +808,27 @@ impl AutoModEngine {
                     rules.push("escalation".to_string());
                 }
             }
+
+            // Was an equal-or-stronger action already taken very recently? If so
+            // this is the tail of a burst we've already handled — delete the
+            // message but don't re-kick, re-announce, or re-count.
+            if let Some((at, ref last)) = rec.last_action {
+                if now.saturating_sub(at) <= cfg.action_cooldown_secs
+                    && action_rank(last) >= action as u8
+                {
+                    suppressed = true;
+                }
+            }
+
+            if !suppressed {
+                rec.violations.push(ViolationRecord {
+                    at: now,
+                    rules: rules.join(","),
+                    score,
+                    action: action.as_str().to_string(),
+                });
+                rec.last_action = Some((now, action.as_str().to_string()));
+            }
         }
 
         AutoModVerdict {
@@ -628,14 +836,16 @@ impl AutoModEngine {
             rules_triggered: rules,
             action,
             dry_run: self.in_dry_run(cfg).await,
+            suppressed,
         }
     }
 
     // ---- enforcement ------------------------------------------------------
 
-    /// Enforce a verdict: record the violation, delete the message (if
-    /// configured), kick/ban the user via the SDK, announce, DM the owner, and
-    /// write an audit log line. Degrades gracefully on permission errors.
+    /// Enforce a verdict: delete the message (if configured), kick/ban the user
+    /// via the SDK, announce, DM the owner, and write an audit log line.
+    /// Degrades gracefully on permission errors. The violation itself was
+    /// already recorded by [`check_message`].
     ///
     /// Returns `true` if the message was "handled" (caller should stop
     /// dispatching a command for it).
@@ -663,24 +873,32 @@ impl AutoModEngine {
         let rules_joined = verdict.rules_triggered.join(",");
         let snippet: String = msg.text().chars().take(80).collect();
 
-        // Record the violation + bump counters (even in dry-run, so escalation
-        // tracking stays accurate for when enforcement goes live).
-        {
+        // A repeat action inside the cooldown: the offender was already kicked /
+        // banned for this burst. Still remove the message, but stay quiet —
+        // otherwise a 10-message flood becomes 10 bans and 10 announcements.
+        if verdict.suppressed {
+            tracing::debug!(
+                "automod: suppressed duplicate {} for {} (recent action within cooldown)",
+                verdict.action.as_str(),
+                short_npub(npub)
+            );
+            if !verdict.dry_run && cfg.delete_spam_messages {
+                self.delete_message(ctx, msg).await;
+            }
+            return true;
+        }
+
+        // The violation was recorded in check_message (atomically with the
+        // escalation count). Here we only bump the lifetime counters, and only
+        // for real enforcement — dry-run keeps escalation tracking accurate
+        // without inflating the "actions taken" stats.
+        if !verdict.dry_run {
             let mut state = self.inner.state.write().await;
-            let rec = state.users.entry(npub.to_string()).or_default();
-            rec.violations.push(ViolationRecord {
-                at: now_secs(),
-                rules: rules_joined.clone(),
-                score: verdict.score,
-                action: verdict.action.as_str().to_string(),
-            });
-            if !verdict.dry_run {
-                match verdict.action {
-                    AutoModAction::Warn => state.total_warns += 1,
-                    AutoModAction::Kick => state.total_kicks += 1,
-                    AutoModAction::Ban => state.total_bans += 1,
-                    AutoModAction::None => {}
-                }
+            match verdict.action {
+                AutoModAction::Warn => state.total_warns += 1,
+                AutoModAction::Kick => state.total_kicks += 1,
+                AutoModAction::Ban => state.total_bans += 1,
+                AutoModAction::None => {}
             }
         }
 
@@ -716,12 +934,11 @@ impl AutoModEngine {
             rules_joined
         );
 
-        // 1. Delete the offending message if configured.
+        // 1. Delete the offending message if configured. Do this BEFORE a ban —
+        //    banning a member of a private community triggers a read-cut rekey,
+        //    after which the deletion may no longer land for existing members.
         if cfg.delete_spam_messages {
-            let channel = msg.channel();
-            if let Err(e) = channel.delete(&msg.message.id).await {
-                tracing::warn!("automod: could not delete message {}: {:?}", msg.message.id, e);
-            }
+            self.delete_message(ctx, msg).await;
         }
 
         // 2. Take the moderation action.
@@ -770,18 +987,30 @@ impl AutoModEngine {
                     }
                 } else {
                     action_ok = false;
-                    tracing::error!("automod: CANNOT {} — no community context on message", verdict.action.as_str());
+                    // community() resolves via the channel → community mapping in
+                    // the SDK's local DB. If that row is missing (bot joined
+                    // before the mapping was written, or sync_communities hasn't
+                    // caught up) there is nothing to kick them *from*.
+                    tracing::error!(
+                        "automod: CANNOT {} {} — no community resolved for channel {}; \
+                         the channel→community mapping is missing locally",
+                        verdict.action.as_str(),
+                        short_npub(npub),
+                        msg.chat_id
+                    );
                 }
             }
             AutoModAction::Warn | AutoModAction::None => {}
         }
 
-        // 3. Announce in-channel.
+        // 3. Announce in-channel. Use `nostr:npub…` so clients render a mention
+        //    rather than a wall of bech32 (matches the level-up announcements).
         if cfg.announce_actions {
+            let mention = format!("nostr:{}", npub);
             let announcement = if permission_gap {
                 format!(
                     "⚠️ Detected spam from {} (score {}) but I lack permission to {}. Rules: {}",
-                    npub,
+                    mention,
                     verdict.score,
                     verdict.action.as_str(),
                     rules_joined
@@ -790,13 +1019,13 @@ impl AutoModEngine {
                 match verdict.action {
                     AutoModAction::Warn => format!(
                         "🚫 {} — message removed for spam ({}). Please knock it off.",
-                        npub, rules_joined
+                        mention, rules_joined
                     ),
                     AutoModAction::Kick if action_ok => {
-                        format!("👢 Kicked {} for spam ({}).", npub, rules_joined)
+                        format!("👢 Kicked {} for spam ({}).", mention, rules_joined)
                     }
                     AutoModAction::Ban if action_ok => {
-                        format!("🔨 Banned {} for spam ({}).", npub, rules_joined)
+                        format!("🔨 Banned {} for spam ({}).", mention, rules_joined)
                     }
                     _ => String::new(),
                 }
@@ -834,6 +1063,30 @@ impl AutoModEngine {
         true
     }
 
+    /// Delete a flagged message.
+    ///
+    /// Goes through `delete_community_message_in` rather than the SDK's
+    /// `Channel::delete`: the latter calls `delete_community_message`, which
+    /// resolves the channel by looking the message up in local state — the GUI
+    /// path. A headless bot keeps no such history, so that call fails with
+    /// "message not found" even when the deletion itself would be valid. We
+    /// already know the channel id, so pass it explicitly.
+    async fn delete_message(&self, ctx: &BotContext, msg: &IncomingMessage) {
+        match ctx
+            .bot
+            .core()
+            .delete_community_message_in(&msg.chat_id, &msg.message.id)
+            .await
+        {
+            Ok(()) => tracing::debug!("automod: deleted message {}", msg.message.id),
+            Err(e) => tracing::warn!(
+                "automod: could not delete message {}: {:?}",
+                msg.message.id,
+                e
+            ),
+        }
+    }
+
     // ---- persistence ------------------------------------------------------
 
     /// Flush state to disk if enough time has elapsed since the last flush.
@@ -851,6 +1104,9 @@ impl AutoModEngine {
 
     /// Force a state flush to disk.
     pub async fn persist(&self) {
+        if !self.inner.persist_to_disk {
+            return;
+        }
         let state = self.inner.state.read().await;
         save_state(&state);
     }
@@ -862,6 +1118,56 @@ impl AutoModEngine {
 
 fn now_secs() -> u64 {
     chrono::Utc::now().timestamp().max(0) as u64
+}
+
+/// Severity rank of a persisted action string, for cooldown comparison.
+fn action_rank(action: &str) -> u8 {
+    match action {
+        "ban" => AutoModAction::Ban as u8,
+        "kick" => AutoModAction::Kick as u8,
+        "warn" => AutoModAction::Warn as u8,
+        _ => AutoModAction::None as u8,
+    }
+}
+
+/// Whether `needle` (already lowercased) occurs in `haystack` (already
+/// lowercased) as a banned term.
+///
+/// A multi-word phrase matches as a plain substring. A single word must match on
+/// word boundaries — otherwise banning "scam" also bans "scamper" and
+/// "descambiar", and since one keyword hit scores +5 (>= the default kick
+/// threshold) those false positives get people kicked on their first message.
+fn contains_banned_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    if needle.contains(char::is_whitespace) {
+        return haystack.contains(needle);
+    }
+    let mut from = 0usize;
+    while let Some(rel) = haystack[from..].find(needle) {
+        let start = from + rel;
+        let end = start + needle.len();
+        let before_ok = haystack[..start]
+            .chars()
+            .next_back()
+            .map(|c| !c.is_alphanumeric())
+            .unwrap_or(true);
+        let after_ok = haystack[end..]
+            .chars()
+            .next()
+            .map(|c| !c.is_alphanumeric())
+            .unwrap_or(true);
+        if before_ok && after_ok {
+            return true;
+        }
+        // Advance past this occurrence's first char to keep scanning.
+        from = start + haystack[start..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        if from >= haystack.len() {
+            break;
+        }
+    }
+    false
 }
 
 /// Normalize text for duplicate comparison: lowercase + collapse whitespace.
@@ -971,17 +1277,49 @@ fn load_state() -> AutoModState {
 }
 
 fn save_state(state: &AutoModState) {
-    let path = state_file();
+    write_json_atomic(&state_file(), state, "state");
+}
+
+fn load_runtime_config() -> Option<RuntimeConfig> {
+    let contents = std::fs::read_to_string(runtime_config_file()).ok()?;
+    match serde_json::from_str::<RuntimeConfig>(&contents) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(
+                "automod: runtime config corrupt ({}) — falling back to bot.toml [automod]",
+                e
+            );
+            None
+        }
+    }
+}
+
+fn save_runtime_config(cfg: &RuntimeConfig) {
+    write_json_atomic(&runtime_config_file(), cfg, "runtime config");
+}
+
+/// Serialize to a temp file and rename into place, so an interrupted write
+/// (SIGTERM during a redeploy) can't leave a half-written JSON file behind that
+/// silently resets auto-mod on the next boot.
+fn write_json_atomic<T: Serialize>(path: &PathBuf, value: &T, what: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    match serde_json::to_string_pretty(state) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                tracing::error!("automod: failed to write state: {}", e);
-            }
+    let json = match serde_json::to_string_pretty(value) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!("automod: failed to serialize {}: {}", what, e);
+            return;
         }
-        Err(e) => tracing::error!("automod: failed to serialize state: {}", e),
+    };
+    let tmp = path.with_extension("json.tmp");
+    if let Err(e) = std::fs::write(&tmp, json) {
+        tracing::error!("automod: failed to write {}: {}", what, e);
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        tracing::error!("automod: failed to commit {}: {}", what, e);
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
@@ -1098,7 +1436,7 @@ pub async fn automod_command(
             let state = if on { "ON ✅" } else { "OFF ❌" };
             let extra = if on && engine.in_dry_run(cfg).await {
                 format!(
-                    "\n⚠️ Running in DRY-RUN (log-only) for {} min from bot start — no kicks/bans yet.",
+                    "\n⚠️ Running in DRY-RUN (log-only) for {} min from now — no kicks/bans yet.\nUse `!automod dryrun off` to go live immediately.",
                     cfg.dry_run_minutes
                 )
             } else {
@@ -1132,7 +1470,7 @@ pub async fn automod_command(
                         return Ok(());
                     }
                     engine.set_dry_run(None).await;
-                    super::reply(ctx, msg, &format!("🔄 Dry-run reset to auto (time-based: first {} min from bot start).", cfg.dry_run_minutes)).await?;
+                    super::reply(ctx, msg, &format!("🔄 Dry-run reset to auto (time-based: first {} min after auto-mod was switched on).", cfg.dry_run_minutes)).await?;
                 }
                 "" | "status" => {
                     let forced = *engine.inner.forced_dry_run.read().await;
@@ -1179,6 +1517,7 @@ pub async fn automod_command(
                  • new-user grace: {} msgs / {}s\n\
                  • thresholds warn/kick/ban: {}/{}/{}\n\
                  • escalation: kick after {}, ban after {} (window {}s)\n\
+                 • action cooldown: {}s\n\
                  • banned words: {}, regex patterns: {}, allowlist domains: {}\n\
                  • tracked users: {}\n\
                  • actions taken — warns: {}, kicks: {}, bans: {}",
@@ -1192,6 +1531,7 @@ pub async fn automod_command(
                 cfg.new_user_max_msgs, cfg.new_user_grace_secs,
                 cfg.warn_threshold, cfg.kick_threshold, cfg.ban_threshold,
                 cfg.escalation_kick_after, cfg.escalation_ban_after, cfg.escalation_window_secs,
+                cfg.action_cooldown_secs,
                 words.len(), patterns.len(), allow.len(),
                 tracked, warns, kicks, bans,
             );
@@ -1424,7 +1764,7 @@ mod tests {
         let mut c = cfg();
         c.max_messages = 3;
         c.burst_window_secs = 10;
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
         // First 3 messages (unique text so dedupe doesn't fire) are fine.
         for i in 0..3 {
@@ -1448,7 +1788,7 @@ mod tests {
         c.dedupe_window_secs = 60;
         // Keep burst out of the way.
         c.max_messages = 100;
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
         let v1 = engine.check_message(&c, "npub1dup", "buy now", "chan").await;
         assert!(!v1.rules_triggered.contains(&"duplicate_content".to_string()));
@@ -1464,7 +1804,7 @@ mod tests {
     async fn test_banned_keyword() {
         let mut c = cfg();
         c.banned_words = vec!["free crypto giveaway".to_string()];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
         let v = engine
             .check_message(&c, "npub1x", "Click here for a FREE CRYPTO GIVEAWAY!!!", "chan")
             .await;
@@ -1478,7 +1818,7 @@ mod tests {
     async fn test_banned_regex_pattern() {
         let mut c = cfg();
         c.banned_patterns = vec![r"(?i)t\.me/\w+".to_string()];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
         let v = engine
             .check_message(&c, "npub1x", "join my telegram t.me/scamchannel", "chan")
             .await;
@@ -1491,7 +1831,7 @@ mod tests {
         let mut c = cfg();
         c.link_action = "flag".to_string();
         c.link_allowlist = vec!["github.com".to_string()];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
         // Allowlisted link → no score.
         let v = engine
@@ -1511,7 +1851,7 @@ mod tests {
     async fn test_mention_spam() {
         let mut c = cfg();
         c.max_mentions = 2;
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
         let text = "hey nostr:npub1aaaaaaaaaaaaaaaaaaaaa npub1bbbbbbbbbbbbbbbbbbbbb npub1ccccccccccccccccccccc";
         let v = engine.check_message(&c, "npub1x", text, "chan").await;
         assert!(v.rules_triggered.contains(&"mention_spam".to_string()));
@@ -1524,7 +1864,7 @@ mod tests {
         c.new_user_grace_secs = 120;
         c.new_user_max_msgs = 2;
         c.max_messages = 100; // keep burst out of the way
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
         engine.record_join("npub1new").await;
         // First 2 messages within grace are OK.
@@ -1542,7 +1882,7 @@ mod tests {
     #[tokio::test]
     async fn test_scoring_thresholds() {
         let c = cfg(); // warn=3, kick=5, ban=7
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
         // Wall of text alone → +1 → below warn → None.
         let mut long = String::from("a");
@@ -1557,7 +1897,7 @@ mod tests {
         let mut c = cfg();
         // Two banned words → 5 + 5 = 10 ≥ ban_threshold(7).
         c.banned_words = vec!["scam".to_string(), "giveaway".to_string()];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
         let v = engine
             .check_message(&c, "npub1x", "scam giveaway now", "chan")
             .await;
@@ -1576,29 +1916,134 @@ mod tests {
         c.escalation_kick_after = 2;
         c.escalation_ban_after = 3;
         c.link_allowlist = vec![];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
 
+        // check_message records the violation itself (atomically with the
+        // escalation count), so each call advances the ladder on its own.
         // 1st violation → warn.
         let v1 = engine
             .check_message(&c, "npub1esc", "https://spam.xyz/a", "chan")
             .await;
         assert_eq!(v1.action, AutoModAction::Warn);
-        engine
-            .execute_dry_record(&v1, "npub1esc")
-            .await;
+        assert!(!v1.suppressed);
 
         // 2nd violation → escalated to kick.
         let v2 = engine
             .check_message(&c, "npub1esc", "https://spam.xyz/b", "chan")
             .await;
         assert_eq!(v2.action, AutoModAction::Kick);
-        engine.execute_dry_record(&v2, "npub1esc").await;
+        assert!(!v2.suppressed);
 
         // 3rd violation → escalated to ban.
         let v3 = engine
             .check_message(&c, "npub1esc", "https://spam.xyz/c", "chan")
             .await;
         assert_eq!(v3.action, AutoModAction::Ban);
+    }
+
+    #[tokio::test]
+    async fn test_action_cooldown_suppresses_repeat() {
+        let mut c = cfg();
+        c.banned_words = vec!["scam".to_string()];
+        c.action_cooldown_secs = 60;
+        c.max_messages = 100;
+        let engine = AutoModEngine::new_ephemeral(&c);
+
+        // First hit: real action, recorded.
+        let v1 = engine.check_message(&c, "npub1burst", "scam one", "chan").await;
+        assert_eq!(v1.action, AutoModAction::Kick);
+        assert!(!v1.suppressed);
+
+        // Same burst, same second: equal-severity repeat is suppressed so we
+        // don't fire N kicks and N announcements for one flood.
+        let v2 = engine.check_message(&c, "npub1burst", "scam two", "chan").await;
+        assert!(v2.suppressed, "repeat action inside the cooldown should be suppressed");
+
+        // Only the first violation was recorded.
+        let history = engine.history(Some("npub1burst"), 10).await;
+        assert_eq!(history.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cooldown_does_not_suppress_escalation() {
+        let mut c = cfg();
+        c.warn_threshold = 2;
+        c.kick_threshold = 50;
+        c.ban_threshold = 100;
+        c.escalation_kick_after = 2;
+        c.escalation_ban_after = 3;
+        c.action_cooldown_secs = 3600; // very long — must not block escalation
+        c.link_allowlist = vec![];
+        let engine = AutoModEngine::new_ephemeral(&c);
+
+        let v1 = engine.check_message(&c, "npub1esc2", "https://spam.xyz/a", "chan").await;
+        assert_eq!(v1.action, AutoModAction::Warn);
+        assert!(!v1.suppressed);
+
+        // Stronger action than the last one → not suppressed, even inside the
+        // cooldown. Otherwise a persistent spammer could never be escalated.
+        let v2 = engine.check_message(&c, "npub1esc2", "https://spam.xyz/b", "chan").await;
+        assert_eq!(v2.action, AutoModAction::Kick);
+        assert!(!v2.suppressed);
+
+        let v3 = engine.check_message(&c, "npub1esc2", "https://spam.xyz/c", "chan").await;
+        assert_eq!(v3.action, AutoModAction::Ban);
+        assert!(!v3.suppressed);
+    }
+
+    #[tokio::test]
+    async fn test_member_leave_keeps_violations() {
+        let mut c = cfg();
+        c.banned_words = vec!["scam".to_string()];
+        let engine = AutoModEngine::new_ephemeral(&c);
+
+        let v = engine.check_message(&c, "npub1kicked", "scam", "chan").await;
+        assert!(v.should_act());
+        assert_eq!(engine.history(Some("npub1kicked"), 10).await.len(), 1);
+
+        // A kick emits MemberLeave. The violation must survive it, or the
+        // offender resets their escalation ladder every time they're kicked.
+        engine.on_member_leave("npub1kicked").await;
+        assert_eq!(
+            engine.history(Some("npub1kicked"), 10).await.len(),
+            1,
+            "violations must survive a kick/leave"
+        );
+
+        // `!automod reset <npub>` is the explicit wipe.
+        assert!(engine.reset_user("npub1kicked").await);
+        assert!(engine.history(Some("npub1kicked"), 10).await.is_empty());
+    }
+
+    #[test]
+    fn test_contains_banned_word_boundaries() {
+        // Single words match on word boundaries only.
+        assert!(contains_banned_word("this is a scam!", "scam"));
+        assert!(contains_banned_word("scam", "scam"));
+        assert!(contains_banned_word("a (scam) here", "scam"));
+        assert!(!contains_banned_word("he scampered off", "scam"));
+        assert!(!contains_banned_word("descambiar", "scam"));
+        // Phrases still match as plain substrings.
+        assert!(contains_banned_word("a free crypto giveaway now", "free crypto giveaway"));
+        assert!(!contains_banned_word("nothing here", "free crypto giveaway"));
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_window_measured_from_enable() {
+        let mut c = cfg();
+        c.dry_run_minutes = 60;
+        let engine = AutoModEngine::new_ephemeral(&c);
+
+        // Not enabled yet → nothing to be dry about.
+        assert!(!engine.in_dry_run(&c).await);
+
+        // Switching on starts the window.
+        engine.set_enabled(true).await;
+        assert!(engine.in_dry_run(&c).await);
+
+        // Forcing it off is honored regardless of the window.
+        engine.set_dry_run(Some(false)).await;
+        assert!(!engine.in_dry_run(&c).await);
     }
 
     #[tokio::test]
@@ -1641,28 +2086,11 @@ mod tests {
     async fn test_reset_user() {
         let mut c = cfg();
         c.banned_words = vec!["spam".to_string()];
-        let engine = AutoModEngine::new(&c);
+        let engine = AutoModEngine::new_ephemeral(&c);
         let _ = engine.check_message(&c, "npub1r", "spam", "chan").await;
         assert!(engine.reset_user("npub1r").await);
         // After reset, dedupe/violation history is cleared.
         assert!(!engine.reset_user("npub1nonexistent").await);
     }
 
-    // --- test-only helper: record a violation the way execute_action would,
-    //     without needing a BotContext/SDK. Used to drive escalation tests.
-    impl AutoModEngine {
-        async fn execute_dry_record(&self, verdict: &AutoModVerdict, npub: &str) {
-            if verdict.action == AutoModAction::None {
-                return;
-            }
-            let mut state = self.inner.state.write().await;
-            let rec = state.users.entry(npub.to_string()).or_default();
-            rec.violations.push(ViolationRecord {
-                at: now_secs(),
-                rules: verdict.rules_triggered.join(","),
-                score: verdict.score,
-                action: verdict.action.as_str().to_string(),
-            });
-        }
-    }
 }

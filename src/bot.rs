@@ -281,8 +281,11 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // -------------------------------------------------------------------------
 
     // Initialize the auto-moderation engine (compiles regex patterns, loads
-    // persisted state). Off unless config.automod.enabled is true.
+    // persisted state + runtime config). Seeded from config.automod.enabled on
+    // first run; after that data/automod-config.json wins so `!automod on` and
+    // friends survive a restart.
     let automod = AutoModEngine::new(&config.automod);
+    automod.spawn_persistence_task();
 
     let ctx = BotContext {
         bot: bot.clone(),
@@ -469,7 +472,9 @@ pub async fn run(config: BotConfig) -> Result<()> {
         .await
         .context("Failed to listen for Ctrl+C")?;
 
-    tracing::info!("Shutdown signal received. Goodbye!");
+    tracing::info!("Shutdown signal received — flushing auto-mod state...");
+    ctx.automod.persist().await;
+    tracing::info!("Goodbye!");
     Ok(())
 }
 

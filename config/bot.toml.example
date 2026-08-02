@@ -116,6 +116,86 @@ invite_policy = "owner"
 # claim_interval_secs = 300  # poll every 5 minutes
 
 # =============================================================================
+# Auto-moderation — spam detection + auto-kick/ban
+# =============================================================================
+#
+# OFF by default. Requires features.moderation and the bot needing KICK / BAN
+# capability in the community (grant it a role that outranks the members it
+# moderates), otherwise it can only detect and announce.
+#
+# These values seed the engine on FIRST RUN only. After that,
+# data/automod-config.json wins so `!automod on`, `!automod dryrun off`,
+# `!automod words add ...` and `!automod allowlist add ...` survive restarts.
+# Delete that file to fall back to the values here.
+#
+# Owner, admins, and (unless strict_mode) authorized users are always immune.
+
+[automod]
+# enabled = false        # master switch; `!automod on` also flips it at runtime
+# strict_mode = false    # true = authorized users are checked too (owner still immune)
+
+# --- Dry-run -----------------------------------------------------------------
+# On the off -> on transition, run log-only for this many minutes so you can see
+# what WOULD be flagged. Measured from when auto-mod was enabled, not from
+# process start, so a restart doesn't put a live engine back into log-only mode.
+# Set 0 to go live immediately; `!automod dryrun off` overrides it at runtime.
+# dry_run_minutes = 60
+
+# --- Rule 1: rate burst ------------------------------------------------------
+# max_messages = 8        # more than this in the window scores +3
+# burst_window_secs = 10
+
+# --- Rule 2: duplicate content ----------------------------------------------
+# max_duplicates = 3      # identical (normalized) messages in the window; +4
+# dedupe_window_secs = 60
+
+# --- Rule 3: banned keywords / regex ----------------------------------------
+# Each hit scores +5, so a single keyword already reaches kick_threshold.
+# Single words match on WORD BOUNDARIES ("scam" won't match "scamper");
+# multi-word phrases match as plain substrings.
+# banned_words = ["free crypto giveaway", "double your sats"]
+# banned_patterns = ['(?i)t\.me/\w+', '(?i)discord\.gg/\w+']
+
+# --- Rule 4: links -----------------------------------------------------------
+# link_action = "flag"    # "off" | "flag" | "block" ("block" forces >= a warn)
+# max_links = 3
+# link_allowlist = ["github.com", "gitlab.com", "nostr.org", "npmjs.com", "crates.io", "docs.rs"]
+
+# --- Rule 5: mention spam ----------------------------------------------------
+# max_mentions = 5        # npub mentions per message; +3
+
+# --- Rule 6: new-account flooding -------------------------------------------
+# new_user_grace_secs = 120   # how long after joining someone counts as "new"
+# new_user_max_msgs = 3       # messages allowed during the grace window; +4
+                              # (new users also score 4/link instead of 2)
+
+# --- Rule 7: caps / wall of text --------------------------------------------
+# caps_threshold_pct = 70
+# caps_min_length = 20
+# max_msg_length = 1000
+
+# --- Scoring thresholds ------------------------------------------------------
+# warn_threshold = 3      # delete the message + warn
+# kick_threshold = 5      # kick
+# ban_threshold = 7       # ban
+
+# --- Escalation --------------------------------------------------------------
+# Nth actionable violation inside the rolling window forces at least that action.
+# Violations survive a kick (a kick emits MemberLeave) and age out on their own.
+# escalation_window_secs = 86400
+# escalation_kick_after = 2
+# escalation_ban_after = 3
+
+# --- Actions -----------------------------------------------------------------
+# Messages are handled concurrently, so without a cooldown a 10-message flood
+# would fire 10 kicks and 10 announcements. Inside this window an
+# equal-or-weaker repeat action is suppressed (the message is still deleted).
+# action_cooldown_secs = 60
+# announce_actions = true       # post "kicked X for spam" in-channel
+# announce_dm_owner = true      # DM the owner on bans + permission gaps
+# delete_spam_messages = true
+
+# =============================================================================
 # Custom — any additional config for your handlers
 # =============================================================================
 

@@ -705,6 +705,12 @@ pub struct AutoModSection {
     pub escalation_ban_after: u32,
 
     // Actions
+    /// Minimum seconds between two enforcement actions against the same user.
+    /// Messages arrive concurrently (one tokio task each), so a spam burst would
+    /// otherwise fire one kick/ban + announcement per message. Within this
+    /// window an equal-or-weaker repeat action is suppressed (the message is
+    /// still deleted).
+    pub action_cooldown_secs: u64,
     /// Post "user X was kicked for spam" in the channel.
     pub announce_actions: bool,
     /// DM the owner on every ban.
@@ -752,6 +758,7 @@ impl Default for AutoModSection {
             escalation_window_secs: 86_400,
             escalation_kick_after: 2,
             escalation_ban_after: 3,
+            action_cooldown_secs: 60,
             announce_actions: true,
             announce_dm_owner: true,
             delete_spam_messages: true,
