@@ -729,6 +729,13 @@ impl AutoModEngine {
         let mut action_ok = true;
         let mut permission_gap = false;
 
+        tracing::info!(
+            "automod: enforce — action={:?} npub={} community={}",
+            verdict.action,
+            short_npub(npub),
+            if community.is_some() { "present" } else { "NONE" }
+        );
+
         match verdict.action {
             AutoModAction::Kick | AutoModAction::Ban => {
                 if let Some(ref community) = community {
@@ -738,28 +745,32 @@ impl AutoModEngine {
                         tracing::warn!("automod: refusing to {} community owner", verdict.action.as_str());
                         action_ok = false;
                     } else {
+                        tracing::info!(
+                            "automod: calling {}.await on npub={}",
+                            verdict.action.as_str(),
+                            short_npub(npub)
+                        );
                         let res = if verdict.action == AutoModAction::Ban {
                             member.ban().await
                         } else {
                             member.kick().await
                         };
-                        if let Err(e) = res {
-                            action_ok = false;
-                            if is_permission_error(&e) {
-                                permission_gap = true;
-                                tracing::error!(
-                                    "automod: PERMISSION GAP — cannot {} (need capability + higher rank): {:?}",
-                                    verdict.action.as_str(),
-                                    e
-                                );
-                            } else {
-                                tracing::error!("automod: {} failed: {:?}", verdict.action.as_str(), e);
+                        match &res {
+                            Ok(()) => {
+                                tracing::info!("automod: {} succeeded for {}", verdict.action.as_str(), short_npub(npub));
+                            }
+                            Err(e) => {
+                                action_ok = false;
+                                tracing::error!("automod: {} FAILED for {}: {:?}", verdict.action.as_str(), short_npub(npub), e);
+                                if is_permission_error(&e) {
+                                    permission_gap = true;
+                                }
                             }
                         }
                     }
                 } else {
                     action_ok = false;
-                    tracing::warn!("automod: no community context — cannot kick/ban");
+                    tracing::error!("automod: CANNOT {} — no community context on message", verdict.action.as_str());
                 }
             }
             AutoModAction::Warn | AutoModAction::None => {}
