@@ -434,28 +434,36 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // never fires and the bot goes permanently deaf.
     //
     // This watchdog tracks the last message timestamp. If no message arrives
-    // for WATCHDOG_SECS, it force-calls sync_communities() which rebuilds
-    // the subscription state. Cheap insurance.
+    // for 90s, it force-refreshes the v2 community subscriptions and syncs.
+    // We use the vector_core internals directly because the SDK's own
+    // reconnect-driven resubscribe misses auto-close-without-disconnect cases.
     {
         let bot_for_watchdog = bot.clone();
         let ctx_for_watchdog = ctx.clone();
         tokio::spawn(async move {
             // Wait for initial startup to complete
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
                 let elapsed = ctx_for_watchdog.last_message_elapsed_secs();
 
-                // If no message in 3 minutes, force a resync
-                if elapsed > 180 {
+                // If no message in 90s (or never received one), force resubscribe
+                if elapsed > 90 {
                     tracing::warn!(
-                        "watchdog: no messages for {}s — forcing community resync",
+                        "watchdog: no messages for {}s — forcing subscription refresh",
                         elapsed
                     );
+                    // Directly refresh the community realtime subscriptions
+                    if let Some(client) = vector_sdk::vector_core::state::nostr_client() {
+                        vector_sdk::vector_core::community::v2::realtime::refresh_subscription(&client).await;
+                        vector_sdk::vector_core::community::realtime::refresh_subscription(&client).await;
+                    }
+                    // Also sync communities which retriggers relay subscriptions
                     bot_for_watchdog.sync_communities().await;
-                    // Also try syncing DMs which retriggers relay subscriptions
                     let _ = bot_for_watchdog.sync_dms(None).await;
+                    // Touch so we don't spam refresh every 30s — give it time to work
+                    ctx_for_watchdog.touch_message();
                 }
             }
         });
