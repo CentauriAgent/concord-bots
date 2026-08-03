@@ -388,15 +388,33 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         }
 
         // The bot was removed from a community.
+        //
+        // The SDK re-emits Removed every time a sync re-folds the community and
+        // re-discovers the removal — which, with the watchdog re-syncing on
+        // quiet periods, meant the owner got the same DM every few minutes
+        // until the stale membership was purged. Notify ONCE per community per
+        // process; later re-detections just log.
         BotEvent::Removed { community_id } => {
-            tracing::warn!("Bot was removed from community {}", community_id);
-            // Notify the owner via DM if auth is configured
-            if let Some(ref auth) = ctx.auth {
-                if let Some(ref owner) = auth.owner_npub() {
-                    let _ = ctx.bot.dm(owner).send(
-                        &format!("⚠️ I was removed from community {}", community_id)
-                    ).await;
+            static REMOVED_NOTIFIED: Lazy<Mutex<std::collections::HashSet<String>>> =
+                Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
+            let first_time = REMOVED_NOTIFIED
+                .lock()
+                .map(|mut s| s.insert(community_id.clone()))
+                .unwrap_or(false);
+
+            if first_time {
+                tracing::warn!("Bot was removed from community {}", community_id);
+                // Notify the owner via DM if auth is configured
+                if let Some(ref auth) = ctx.auth {
+                    if let Some(ref owner) = auth.owner_npub() {
+                        let _ = ctx.bot.dm(owner).send(
+                            &format!("⚠️ I was removed from community {} (further re-detections will be logged, not DMed)", community_id)
+                        ).await;
+                    }
                 }
+            } else {
+                tracing::debug!("Removal from {} re-detected (already notified)", community_id);
             }
         }
 
