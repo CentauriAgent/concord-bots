@@ -506,12 +506,17 @@ pub async fn run(config: BotConfig) -> Result<()> {
                         // Update last-message timestamp for watchdog.
                         ctx.touch_message();
 
+                        // PRIVACY: never log message CONTENT at info — these are
+                        // decrypted messages from E2EE communities, and journald
+                        // would retain a full transcript. Metadata only; content
+                        // is available at trace level for local debugging.
                         tracing::info!(
-                            "Incoming message from {} (npub={:?}): {}",
-                            msg.chat_id,
-                            msg.message.npub,
-                            msg.text()
+                            "Incoming message from {} (npub={:?}, {} chars)",
+                            &msg.chat_id[..msg.chat_id.len().min(12)],
+                            msg.message.npub.as_deref().map(|n| &n[..n.len().min(16)]),
+                            msg.text().chars().count()
                         );
+                        tracing::trace!("message content: {}", msg.text());
 
                         if let Err(e) = handlers::on_message(&ctx, &msg).await {
                             tracing::error!("Handler error: {:?}", e);
