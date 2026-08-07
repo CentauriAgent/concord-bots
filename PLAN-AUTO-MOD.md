@@ -1,7 +1,13 @@
 # PLAN-AUTO-MOD — Auto-Moderation (Spam Detection + Auto-Kick/Ban)
 
+> **SUPERSEDED (2026-08-07).** Auto-moderation was extracted into the standalone
+> **concord-automod** bot and removed from Flagship, so both could run in the
+> same community without double-enforcing every rule. This document is kept for
+> its design rationale only — none of it describes current concord-bots code.
+> Flagship retains the MANUAL moderation commands (`!kick`, `!ban`, `!warn`, …).
+
 **Created:** 2026-08-01  
-**Status:** Planning  
+**Status:** Superseded — implemented, then moved to concord-automod  
 **Requested by:** Derek
 
 ---

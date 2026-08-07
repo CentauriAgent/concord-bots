@@ -87,7 +87,6 @@ pub fn normalize_npub(input: &str) -> String {
     s.to_string()
 }
 
-pub mod automod;
 pub mod commands;
 pub mod community_cmds;
 pub mod fun;
@@ -167,33 +166,6 @@ pub async fn on_message(ctx: &BotContext, msg: &vector_sdk::IncomingMessage) -> 
                 "Attachment received: {} ({} bytes, .{}) from {}",
                 att.name, att.size, att.extension, msg.chat_id
             );
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 0c. Auto-moderation pre-check (community messages only)
-    // -------------------------------------------------------------------------
-    // Runs AFTER XP tracking but BEFORE command dispatch. If auto-mod acts on
-    // a message, we return early so the command (if any) is never dispatched.
-    // Only community messages are checked; DMs and the bot's own messages are
-    // skipped. Immune users (owner/admins/authorized) bypass everything.
-    //
-    // The engine's own `enabled` flag is authoritative (it's seeded from
-    // config.automod.enabled and persisted across restarts), so we don't also
-    // consult the TOML value here — doing so would let a stale `enabled = true`
-    // in bot.toml keep feeding messages to an engine the operator turned off.
-    if msg.is_group && ctx.automod.is_enabled().await {
-        if let Some(ref npub) = msg.message.npub {
-            if !npub.is_empty()
-                && npub != ctx.bot.npub()
-                // Respect !disable — a channel the bot was told to stay out of
-                // shouldn't get its messages deleted or its members kicked.
-                && ctx.community_db.is_channel_enabled(&msg.chat_id).unwrap_or(true)
-                && automod::on_message(ctx, msg, npub).await
-            {
-                // Message was handled by auto-mod — stop here.
-                return Ok(());
-            }
         }
     }
 
@@ -285,12 +257,6 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         BotEvent::MemberJoin { channel_id, npub } => {
             tracing::info!("Member {} joined channel {}", npub, channel_id);
 
-            // Auto-mod: record join time for new-user flooding protection
-            // (skip the bot itself).
-            if ctx.automod.is_enabled().await && npub != ctx.bot.npub() {
-                ctx.automod.record_join(npub).await;
-            }
-
             // If the bot itself is joining a channel, mark it disabled by default —
             // but only if it isn't already enabled (preserve prior !enable state across restarts).
             if npub == ctx.bot.npub() {
@@ -336,13 +302,6 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
         // Someone left a community channel.
         BotEvent::MemberLeave { channel_id, npub } => {
             tracing::info!("Member {} left channel {}", npub, channel_id);
-
-            // Auto-mod: clear transient tracking for members who leave, but keep
-            // their violation history — a kick emits MemberLeave, so wiping it
-            // here would reset the offender's escalation counter every time.
-            if ctx.automod.is_enabled().await && npub != ctx.bot.npub() {
-                ctx.automod.on_member_leave(npub).await;
-            }
         }
 
         // A message was edited or received a reaction.
