@@ -327,8 +327,8 @@ pub async fn on_event(ctx: &BotContext, event: BotEvent) -> Result<()> {
                 };
 
                 if should_welcome {
-                    let welcome = "Welcome! 🎉 Type !help to see what I can do.";
-                    let _ = ctx.bot.channel(channel_id.clone()).send(welcome).await;
+                    let welcome = format!("Welcome nostr:{}! 🎉 Type !help to see what I can do.", npub);
+                    let _ = ctx.bot.channel(channel_id.clone()).send(&welcome).await;
                 }
             }
         }
