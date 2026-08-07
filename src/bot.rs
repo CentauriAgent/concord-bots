@@ -16,7 +16,6 @@ use crate::community::Database;
 use crate::config::BotConfig;
 use crate::git_monitor::store::SubscriptionStore;
 use crate::handlers;
-use crate::handlers::automod::AutoModEngine;
 use crate::rate_limiter::RateLimiter;
 use crate::wallet::CashuWallet;
 
@@ -37,8 +36,6 @@ pub struct BotContext {
     pub community_db: Database,
     /// Git repo monitor subscription store.
     pub git_store: Option<SubscriptionStore>,
-    /// Auto-moderation engine (spam detection + auto-kick/ban).
-    pub automod: AutoModEngine,
     /// When the bot last heard a message (for the deafness watchdog). Seeded
     /// with the startup instant so "silence" is well-defined before the first
     /// message ever arrives — there is no sentinel value to leak into logs.
@@ -290,13 +287,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // Step 3: Create shared context
     // -------------------------------------------------------------------------
 
-    // Initialize the auto-moderation engine (compiles regex patterns, loads
-    // persisted state + runtime config). Seeded from config.automod.enabled on
-    // first run; after that data/automod-config.json wins so `!automod on` and
-    // friends survive a restart.
-    let automod = AutoModEngine::new(&config.automod);
-    automod.spawn_persistence_task();
-
     let ctx = BotContext {
         bot: bot.clone(),
         config: Arc::new(config),
@@ -305,7 +295,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
         wallet,
         community_db,
         git_store,
-        automod,
         last_message: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
     };
 
@@ -542,9 +531,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         .await
         .context("Failed to listen for Ctrl+C")?;
 
-    tracing::info!("Shutdown signal received — flushing auto-mod state...");
-    ctx.automod.persist().await;
-    tracing::info!("Goodbye!");
+    tracing::info!("Shutdown signal received. Goodbye!");
     Ok(())
 }
 
