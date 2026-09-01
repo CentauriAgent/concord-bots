@@ -11,3 +11,6 @@ auth_state.json
 
 # Runtime state — never commit (contains wallet seed, DBs, user data)
 /data/
+
+# Config backups (contain nsec — never commit)
+/config/*.bak*

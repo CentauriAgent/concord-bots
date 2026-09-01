@@ -1,0 +1,6 @@
+# Keep build context small — target/ and local data/config never enter the image.
+target/
+.git/
+data/
+config/bot.toml
+config/bot.toml.bak*

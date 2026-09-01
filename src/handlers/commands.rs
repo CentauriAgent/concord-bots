@@ -25,6 +25,7 @@ use crate::handlers::wallet_cmds;
 use crate::handlers::nostr_cmds;
 use crate::handlers::moderation_cmds;
 use crate::handlers::community_cmds;
+use crate::handlers::ai_bridge;
 use crate::handlers::{normalize_npub, git_cmds};
 use crate::rate_limiter::RateLimitResult;
 
@@ -431,6 +432,30 @@ pub async fn on_message(ctx: &BotContext, msg: &IncomingMessage) -> Result<()> {
         "!community" | "!invite" | "!join" | "!members" | "!channels" | "!roles" | "!caps"
             if features.community => {
             dispatch_v2_community(ctx, msg, command, args).await?;
+        }
+
+        // =====================================================================
+        // AI (gated by features.ai)
+        // =====================================================================
+
+        "!ask"
+            if features.ai => {
+            ai_bridge::ask(ctx, msg, args).await?;
+        }
+
+        "!summarize"
+            if features.ai => {
+            ai_bridge::summarize(ctx, msg, args).await?;
+        }
+
+        "!sentiment"
+            if features.ai => {
+            ai_bridge::sentiment(ctx, msg, args).await?;
+        }
+
+        "!image"
+            if features.ai => {
+            ai_bridge::image(ctx, msg, args).await?;
         }
 
         // =====================================================================
@@ -849,6 +874,12 @@ const COMMAND_REGISTRY: &[CommandMeta] = &[
     CommandMeta { name: "!choose",   description: "Pick randomly",                  feature: Some(Feature::Fun), auth: AuthLevel::Public },
     CommandMeta { name: "!rps",      description: "Rock paper scissors",           feature: Some(Feature::Fun), auth: AuthLevel::Public },
 
+    // AI
+    CommandMeta { name: "!ask",      description: "Ask the AI a question",          feature: Some(Feature::Ai), auth: AuthLevel::Public },
+    CommandMeta { name: "!summarize", description: "Summarize text — usage !summarize <text>", feature: Some(Feature::Ai), auth: AuthLevel::Public },
+    CommandMeta { name: "!sentiment", description: "Analyze sentiment — usage !sentiment <text>", feature: Some(Feature::Ai), auth: AuthLevel::Public },
+    CommandMeta { name: "!image",     description: "Generate an image (OpenAI) — usage !image <prompt>", feature: Some(Feature::Ai), auth: AuthLevel::Public },
+
     // Wallet (gated by Nostr feature)
     CommandMeta { name: "!balance",  description: "Show Cashu wallet balance",         feature: Some(Feature::Nostr), auth: AuthLevel::Owner },
     CommandMeta { name: "!tip",      description: "Tip sats as Cashu token",           feature: Some(Feature::Nostr), auth: AuthLevel::Authorized },
@@ -1001,5 +1032,13 @@ mod tests {
         assert!(help.contains("!grantmod"));
         assert!(help.contains("!grantmod"));
         assert!(help.contains("!revokemod"));
+    }
+
+    #[test]
+    fn test_help_text_ai_command_when_enabled() {
+        let mut features = FeaturesSection::default();
+        features.ai = true;
+        let help = help_text(&features);
+        assert!(help.contains("!ask"));
     }
 }

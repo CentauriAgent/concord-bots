@@ -221,14 +221,26 @@ journalctl -u concord-bots -f
 
 ### Docker
 
+Build the image:
+
 ```bash
 docker build -t concord-bots .
+```
+
+Run a bot (mount your config — never bake `bot.toml` with your nsec into the image):
+
+```bash
 docker run -d \
   --name my-bot \
   -v $(pwd)/config:/app/config \
+  -v concord-data:/app/data \
   -e NSEC=nsec1... \
   concord-bots
 ```
+
+The bot reads config from `$BOT_CONFIG` (default `/app/config/bot.toml`), so mounting `./config` is enough. `/app/data` persists the auto-generated identity / wallet between runs — keep the volume or the identity is regenerated every start. Example configs: `config/bot.toml.example`.
+
+The root `Dockerfile` is the canonical build. (`deploy/` also holds service/install helpers.)
 
 ## Configuration
 
