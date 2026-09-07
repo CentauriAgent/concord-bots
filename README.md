@@ -114,10 +114,10 @@ concord-bots/
 | `!git list` | Public | List this channel's repo subscriptions |
 | `!git remove <repo\|id>` | Authorized+ | Unsubscribe from a repo |
 | `!git poll` | Owner | Force-poll all subscriptions in this channel |
-| `!balance` | Public | Show wallet balance (sats) |
+| `!balance` | Owner | Show wallet balance (sats) |
 | `!tip <sats>` | Authorized+ | Send a Cashu token tip |
-| `!deposit [sats]` | Authorized+ | Generate BOLT11 invoice to add funds |
-| `!withdraw <invoice>` | Authorized+ | Pay a BOLT11 invoice from wallet |
+| `!deposit [sats]` | Public | Generate BOLT11 invoice to add funds |
+| `!withdraw <invoice>` | Owner | Pay a BOLT11 invoice from wallet |
 | `!zap <npub> <sats> [msg]` | Authorized+ | NIP-57 Lightning zap to a Nostr user |
 | `!ask <question>` | Public* | Ask the AI a question (requires `features.ai`) |
 | `!summarize <text>` | Public* | Summarize text (requires `features.ai`) |
@@ -137,15 +137,17 @@ Enable in `config/bot.toml`:
 [features]
 ai = true
 
-[ai]
-provider = "openai"        # OpenAI-compatible chat completions
-model = "gpt-4o-mini"      # any model your endpoint serves
+[custom.ai]
+provider = "openai"        # "openclaw" (local CLI) or "openai" (api.openai.com)
+model = "gpt-4o-mini"      # used by the openai provider
 # api_key = "sk-..."       # or set the AI_API_KEY env var
 # system_prompt = "You are a helpful assistant for a Nostr community."
+# enabled = true            # additionally answer NON-command messages (conversational mode)
 ```
 
-Because the provider speaks the OpenAI wire format, self-hosted gateways
-(llama.cpp, vLLM, OpenRouter...) work too — point `model` and `api_key` at them.
+Two providers: `openclaw` (default) shells out to the `openclaw` CLI on the
+host; `openai` calls the OpenAI Chat Completions API (`!image` uses the OpenAI
+Images API and requires this provider).
 
 ```text
 !ask what's the difference between NIP-17 and NIP-04 DMs?
@@ -214,10 +216,10 @@ Any Lightning wallet (Wallet of Satoshi, Damus, Muun, etc.) can now zap `<your-b
 
 | Command | Auth Level | Description |
 |---------|------------|-------------|
-| `!balance` | Public | Show wallet balance in sats |
+| `!balance` | Owner | Show wallet balance in sats |
 | `!tip <sats>` | Authorized+ | Send a Cashu token tip |
-| `!deposit [sats]` | Authorized+ | Generate a BOLT11 invoice to add funds |
-| `!withdraw <invoice>` | Authorized+ | Pay a BOLT11 invoice from the wallet |
+| `!deposit [sats]` | Public | Generate a BOLT11 invoice to add funds |
+| `!withdraw <invoice>` | Owner | Pay a BOLT11 invoice from the wallet |
 | `!zap <npub> <sats> [msg]` | Authorized+ | NIP-57 zap to another Nostr user |
 
 ### How receiving works
@@ -307,6 +309,25 @@ Tell your AI agent:
 > "Read the AGENTS.md file in the concord-bots repo and build me a bot that does [your requirements]."
 
 The agent will read AGENTS.md, implement handlers, configure the bot, and deploy it.
+
+## Documentation
+
+The full documentation site lives in [`site/`](site/) (VitePress):
+
+```bash
+cd site
+npm install
+npm run docs:dev      # local dev server
+npm run docs:build    # static build → site/dist/
+```
+
+It covers [getting started](site/guide/getting-started.md), the complete
+[command reference](site/guide/commands.md), [configuration](site/guide/configuration.md),
+a [custom handler tutorial](site/guide/custom-handlers.md),
+[examples](site/guide/examples.md), and [deployment](site/guide/deployment.md)
+— including publishing the docs to Nostr with **nsite** (see
+[`site/deploy-nsite.sh`](site/deploy-nsite.sh)). Not on GitHub Pages — the site
+is hosted on Nostr relays + Blossom servers, signed by a dedicated key.
 
 ## For AI Agents
 
