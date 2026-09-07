@@ -1,0 +1,23 @@
+/* concord-bots brand overrides — purple accent on the default theme */
+:root {
+  --vp-c-brand-1: #8b5cf6;
+  --vp-c-brand-2: #7c3aed;
+  --vp-c-brand-3: #6d28d9;
+  --vp-c-brand-light: #a78bfa;
+  --vp-button-brand-bg: #8b5cf6;
+  --vp-button-brand-hover-bg: #7c3aed;
+}
+
+.dark {
+  --vp-c-brand-1: #a78bfa;
+  --vp-c-brand-2: #8b5cf6;
+  --vp-c-brand-3: #7c3aed;
+}
+
+/* Home hero name gradient */
+.VPHero .name {
+  background: linear-gradient(120deg, #8b5cf6 30%, #c084fc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

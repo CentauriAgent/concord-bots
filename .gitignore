@@ -9,6 +9,14 @@ identity.nsec
 .DS_Store
 auth_state.json
 
+# Docs site — build output, deps, and nsite-cli project config
+# (.nsite/ holds the publish key — NEVER commit it)
+site/node_modules/
+site/dist/
+site/.vitepress/cache/
+site/.vitepress/dist/
+.nsite/
+
 # Runtime state — never commit (contains wallet seed, DBs, user data)
 /data/
 
