@@ -119,6 +119,40 @@ concord-bots/
 | `!deposit [sats]` | Authorized+ | Generate BOLT11 invoice to add funds |
 | `!withdraw <invoice>` | Authorized+ | Pay a BOLT11 invoice from wallet |
 | `!zap <npub> <sats> [msg]` | Authorized+ | NIP-57 Lightning zap to a Nostr user |
+| `!ask <question>` | Public* | Ask the AI a question (requires `features.ai`) |
+| `!summarize <text>` | Public* | Summarize text (requires `features.ai`) |
+| `!sentiment <text>` | Public* | Analyze sentiment of text (requires `features.ai`) |
+| `!image <prompt>` | Public* | Generate an image from a prompt (requires `features.ai`) |
+
+\*AI commands are gated behind the `ai` feature flag — see [AI Bridge](#ai-bridge-optional).
+
+## AI Bridge (optional)
+
+Concord bots can act as an AI bridge for their communities: members ask questions,
+summarize long messages, check sentiment, or generate images right in chat.
+
+Enable in `config/bot.toml`:
+
+```toml
+[features]
+ai = true
+
+[ai]
+provider = "openai"        # OpenAI-compatible chat completions
+model = "gpt-4o-mini"      # any model your endpoint serves
+# api_key = "sk-..."       # or set the AI_API_KEY env var
+# system_prompt = "You are a helpful assistant for a Nostr community."
+```
+
+Because the provider speaks the OpenAI wire format, self-hosted gateways
+(llama.cpp, vLLM, OpenRouter...) work too — point `model` and `api_key` at them.
+
+```text
+!ask what's the difference between NIP-17 and NIP-04 DMs?
+!summarize <paste of a long post>
+!sentiment this community is on fire today 🚀
+!image a lighthouse beaming purple light over a calm sea
+```
 
 ## Authorization System
 
