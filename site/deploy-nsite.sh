@@ -59,7 +59,9 @@ The publish command awaiting the owner's go:
     NOSTR_PRIVATE_KEY=nsec1YOUR_DOCS_NPUB_HERE \\
     NOSTR_RELAYS='$NOSTR_RELAYS' \\
     BLOSSOM_SERVERS='$BLOSSOM_SERVERS' \\
-    npx $NSITE_CLI upload $DIST_DIR
+    npx $NSITE_CLI upload $DIST_DIR \\
+    -r "$NOSTR_RELAYS" -s "$BLOSSOM_SERVERS" -k nsec1YOUR_DOCS_NPUB_HERE \\
+    --publish-server-list --publish-relay-list
 
 Notes:
   - The key becomes the site identity/address (/<npub>/ at every gateway).
@@ -80,8 +82,12 @@ echo "==> Publishing to Nostr (nsite)"
 echo "    relays:   $NOSTR_RELAYS"
 echo "    blossom:  $BLOSSOM_SERVERS"
 
+# First publish also announces the blossom server list (10063) and relay list
+# (10002) so gateways can discover where this npub keeps its files.
 # shellcheck disable=SC2086
-npx -y "$NSITE_CLI" upload "$DIST_DIR"
+npx -y "$NSITE_CLI" upload "$DIST_DIR" \
+  -r "$NOSTR_RELAYS" -s "$BLOSSOM_SERVERS" -k "$NOSTR_PRIVATE_KEY" \
+  --publish-server-list --publish-relay-list
 
 echo ""
 echo "✅ Published. Site is live at nsite gateways under the publishing npub, e.g.:"
